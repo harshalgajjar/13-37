@@ -51,313 +51,117 @@ static lv_obj_t *make_tile(lv_obj_t *parent, const char *label_text)
 //
 // Twin-bell alarm clock with splayed legs, striker bar across the bells, and
 // hands that read roughly "alarm time".
+// ---- Polished line-art icons ----------------------------------------------
+// Monochrome light-grey stroke with a single restrained orange accent.
+#define ICO_INK     lv_color_hex(0xE8E8EA)
+#define ICO_DIM     lv_color_hex(0x6E6E73)
+#define ICO_ACCENT  lv_color_hex(0xFF7B2E)
+
+static void ico_ring(lv_obj_t *p, int cx, int cy, int d, int w, lv_color_t c)
+{
+    lv_obj_t *o = lv_obj_create(p);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, d, d);
+    lv_obj_set_pos(o, cx - d / 2, cy - d / 2);
+    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(o, w, 0);
+    lv_obj_set_style_border_color(o, c, 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+static void ico_line(lv_obj_t *p, int x1, int y1, int x2, int y2, int w, lv_color_t c)
+{
+    lv_point_precise_t *pts = (lv_point_precise_t *)lv_malloc(sizeof(lv_point_precise_t) * 2);
+    pts[0].x = x1; pts[0].y = y1; pts[1].x = x2; pts[1].y = y2;
+    lv_obj_t *l = lv_line_create(p);
+    lv_line_set_points(l, pts, 2);
+    lv_obj_set_style_line_width(l, w, 0);
+    lv_obj_set_style_line_color(l, c, 0);
+    lv_obj_set_style_line_rounded(l, true, 0);
+}
+
+static void ico_dot(lv_obj_t *p, int cx, int cy, int d, lv_color_t c)
+{
+    lv_obj_t *o = lv_obj_create(p);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, d, d);
+    lv_obj_set_pos(o, cx - d / 2, cy - d / 2);
+    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(o, c, 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+static void ico_rrect(lv_obj_t *p, int cx, int cy, int w, int h, int r, int sw, lv_color_t c, bool fill)
+{
+    lv_obj_t *o = lv_obj_create(p);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_pos(o, cx - w / 2, cy - h / 2);
+    lv_obj_set_style_radius(o, r, 0);
+    if (fill) {
+        lv_obj_set_style_bg_color(o, c, 0);
+        lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    } else {
+        lv_obj_set_style_bg_opa(o, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(o, sw, 0);
+        lv_obj_set_style_border_color(o, c, 0);
+    }
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+}
+
 static void draw_alarm_icon(lv_obj_t *tile)
 {
-    static lv_point_precise_t alarm_leg_l[] = { {72, 116}, {62, 130} };
-    lv_obj_t *leg_l = lv_line_create(tile);
-    lv_line_set_points(leg_l, alarm_leg_l, 2);
-    lv_obj_set_style_line_color(leg_l, lv_color_make(0xCC, 0xCC, 0xCC), 0);
-    lv_obj_set_style_line_width(leg_l, 5, 0);
-    lv_obj_set_style_line_rounded(leg_l, true, 0);
-
-    static lv_point_precise_t alarm_leg_r[] = { {108, 116}, {118, 130} };
-    lv_obj_t *leg_r = lv_line_create(tile);
-    lv_line_set_points(leg_r, alarm_leg_r, 2);
-    lv_obj_set_style_line_color(leg_r, lv_color_make(0xCC, 0xCC, 0xCC), 0);
-    lv_obj_set_style_line_width(leg_r, 5, 0);
-    lv_obj_set_style_line_rounded(leg_r, true, 0);
-
-    lv_obj_t *face = lv_obj_create(tile);
-    lv_obj_set_size(face, 76, 76);
-    lv_obj_set_style_radius(face, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(face, lv_color_make(0x22, 0x22, 0x22), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(face, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(face, lv_color_make(0xCC, 0xCC, 0xCC), LV_PART_MAIN);
-    lv_obj_set_style_border_width(face, 3, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(face, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(face, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(face, LV_ALIGN_TOP_MID, 0, 38);
-
-    for (int side = -1; side <= 1; side += 2) {
-        lv_obj_t *bell = lv_obj_create(tile);
-        lv_obj_set_size(bell, 22, 22);
-        lv_obj_set_style_radius(bell, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(bell, lv_color_make(0xFF, 0xCC, 0x00), LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(bell, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_border_color(bell, lv_color_make(0xAA, 0x88, 0x00), LV_PART_MAIN);
-        lv_obj_set_style_border_width(bell, 1, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(bell, 0, LV_PART_MAIN);
-        lv_obj_clear_flag(bell, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_align(bell, LV_ALIGN_TOP_MID, side * 22, 26);
-    }
-
-    lv_obj_t *striker = lv_obj_create(tile);
-    lv_obj_set_size(striker, 50, 4);
-    lv_obj_set_style_radius(striker, 2, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(striker, lv_color_make(0xCC, 0xCC, 0xCC), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(striker, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(striker, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(striker, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(striker, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(striker, LV_ALIGN_TOP_MID, 0, 24);
-
-    static lv_point_precise_t alarm_min_pts[] = { {90, 76}, {90, 52} };
-    lv_obj_t *minute = lv_line_create(tile);
-    lv_line_set_points(minute, alarm_min_pts, 2);
-    lv_obj_set_style_line_color(minute, lv_color_make(0xFF, 0xCC, 0x00), 0);
-    lv_obj_set_style_line_width(minute, 3, 0);
-    lv_obj_set_style_line_rounded(minute, true, 0);
-
-    static lv_point_precise_t alarm_hour_pts[] = { {90, 76}, {76, 88} };
-    lv_obj_t *hour = lv_line_create(tile);
-    lv_line_set_points(hour, alarm_hour_pts, 2);
-    lv_obj_set_style_line_color(hour, lv_color_make(0xFF, 0xCC, 0x00), 0);
-    lv_obj_set_style_line_width(hour, 4, 0);
-    lv_obj_set_style_line_rounded(hour, true, 0);
-
-    lv_obj_t *dot = lv_obj_create(tile);
-    lv_obj_set_size(dot, 6, 6);
-    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(dot, lv_color_make(0xFF, 0xCC, 0x00), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(dot, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(dot, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(dot, LV_ALIGN_TOP_MID, 0, 73);
+    const int cx = 90, cy = 76, R = 30;
+    ico_ring(tile, cx, cy, R * 2, 3, ICO_INK);
+    ico_line(tile, cx - 21, cy - 21, cx - 30, cy - 30, 4, ICO_INK);
+    ico_line(tile, cx + 21, cy - 21, cx + 30, cy - 30, 4, ICO_INK);
+    ico_line(tile, cx - 20, cy + 22, cx - 28, cy + 32, 3, ICO_INK);
+    ico_line(tile, cx + 20, cy + 22, cx + 28, cy + 32, 3, ICO_INK);
+    ico_line(tile, cx, cy, cx, cy - 18, 3, ICO_INK);
+    ico_line(tile, cx, cy, cx + 13, cy + 6, 3, ICO_ACCENT);
+    ico_dot(tile, cx, cy, 6, ICO_INK);
 }
 
-// Round-faced stopwatch with start/stop button, hour ticks, and a red second
-// hand caught mid-sweep.
 static void draw_stopwatch_icon(lv_obj_t *tile)
 {
-    lv_obj_t *btn = lv_obj_create(tile);
-    lv_obj_set_size(btn, 18, 8);
-    lv_obj_set_style_radius(btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(btn, lv_color_make(0xCC, 0xCC, 0xCC), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(btn, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, 22);
-
-    lv_obj_t *stem = lv_obj_create(tile);
-    lv_obj_set_size(stem, 8, 6);
-    lv_obj_set_style_radius(stem, 1, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(stem, lv_color_make(0xCC, 0xCC, 0xCC), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(stem, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(stem, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(stem, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(stem, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(stem, LV_ALIGN_TOP_MID, 0, 30);
-
-    lv_obj_t *face = lv_obj_create(tile);
-    lv_obj_set_size(face, 78, 78);
-    lv_obj_set_style_radius(face, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(face, lv_color_make(0x22, 0x22, 0x22), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(face, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(face, lv_color_make(0xCC, 0xCC, 0xCC), LV_PART_MAIN);
-    lv_obj_set_style_border_width(face, 3, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(face, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(face, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(face, LV_ALIGN_TOP_MID, 0, 36);
-
-    int cx = 90, cy = 75;
-    for (int i = 0; i < 12; i++) {
-        bool cardinal = (i % 3 == 0);
-        lv_obj_t *tick = lv_obj_create(tile);
-        lv_obj_set_size(tick, cardinal ? 3 : 2, cardinal ? 8 : 5);
-        lv_obj_set_style_radius(tick, 1, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(tick,
-            cardinal ? lv_color_make(0xEE, 0xEE, 0xEE)
-                     : lv_color_make(0x88, 0x88, 0x88), LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(tick, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_border_width(tick, 0, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(tick, 0, LV_PART_MAIN);
-        lv_obj_clear_flag(tick, LV_OBJ_FLAG_SCROLLABLE);
-        float rad = i * 3.14159f / 6.0f;
-        int tx = cx + (int)(33.0f * sinf(rad));
-        int ty = cy - (int)(33.0f * cosf(rad));
-        lv_obj_set_pos(tick, tx - 1, ty - (cardinal ? 4 : 2));
-    }
-
-    static lv_point_precise_t sw_hand_pts[] = { {90, 75}, {112, 56} };
-    lv_obj_t *hand = lv_line_create(tile);
-    lv_line_set_points(hand, sw_hand_pts, 2);
-    lv_obj_set_style_line_color(hand, lv_color_make(0xFF, 0x44, 0x44), 0);
-    lv_obj_set_style_line_width(hand, 3, 0);
-    lv_obj_set_style_line_rounded(hand, true, 0);
-
-    lv_obj_t *dot = lv_obj_create(tile);
-    lv_obj_set_size(dot, 8, 8);
-    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(dot, lv_color_make(0xFF, 0x44, 0x44), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(dot, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(dot, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(dot, LV_ALIGN_TOP_MID, 0, 71);
+    const int cx = 90, cy = 80, R = 30;
+    ico_ring(tile, cx, cy, R * 2, 3, ICO_INK);
+    ico_rrect(tile, cx, cy - R - 10, 16, 9, 3, 0, ICO_INK, true);
+    ico_line(tile, cx, cy - R - 5, cx, cy - R, 4, ICO_INK);
+    ico_line(tile, cx + 21, cy - 21, cx + 28, cy - 28, 5, ICO_INK);
+    ico_line(tile, cx, cy, cx + 15, cy - 15, 3, ICO_ACCENT);
+    ico_dot(tile, cx, cy, 6, ICO_ACCENT);
 }
 
-// Hourglass timer: top + bottom caps, four diagonal frame edges that meet at
-// the neck, sand stripes in both halves, and a falling stream at the neck.
 static void draw_timer_icon(lv_obj_t *tile)
 {
-    lv_obj_t *top_bar = lv_obj_create(tile);
-    lv_obj_set_size(top_bar, 60, 6);
-    lv_obj_set_style_radius(top_bar, 2, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(top_bar, lv_color_make(0xDD, 0xDD, 0xDD), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(top_bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(top_bar, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(top_bar, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(top_bar, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(top_bar, LV_ALIGN_TOP_MID, 0, 24);
-
-    lv_obj_t *bot_bar = lv_obj_create(tile);
-    lv_obj_set_size(bot_bar, 60, 6);
-    lv_obj_set_style_radius(bot_bar, 2, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(bot_bar, lv_color_make(0xDD, 0xDD, 0xDD), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(bot_bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(bot_bar, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(bot_bar, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(bot_bar, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(bot_bar, LV_ALIGN_TOP_MID, 0, 106);
-
-    static lv_point_precise_t timer_tl[] = { {60, 30}, {88, 68} };
-    lv_obj_t *tl = lv_line_create(tile);
-    lv_line_set_points(tl, timer_tl, 2);
-    lv_obj_set_style_line_color(tl, lv_color_make(0xDD, 0xDD, 0xDD), 0);
-    lv_obj_set_style_line_width(tl, 5, 0);
-    lv_obj_set_style_line_rounded(tl, true, 0);
-
-    static lv_point_precise_t timer_tr[] = { {120, 30}, {92, 68} };
-    lv_obj_t *tr = lv_line_create(tile);
-    lv_line_set_points(tr, timer_tr, 2);
-    lv_obj_set_style_line_color(tr, lv_color_make(0xDD, 0xDD, 0xDD), 0);
-    lv_obj_set_style_line_width(tr, 5, 0);
-    lv_obj_set_style_line_rounded(tr, true, 0);
-
-    static lv_point_precise_t timer_bl[] = { {88, 68}, {60, 106} };
-    lv_obj_t *bl = lv_line_create(tile);
-    lv_line_set_points(bl, timer_bl, 2);
-    lv_obj_set_style_line_color(bl, lv_color_make(0xDD, 0xDD, 0xDD), 0);
-    lv_obj_set_style_line_width(bl, 5, 0);
-    lv_obj_set_style_line_rounded(bl, true, 0);
-
-    static lv_point_precise_t timer_br[] = { {92, 68}, {120, 106} };
-    lv_obj_t *br = lv_line_create(tile);
-    lv_line_set_points(br, timer_br, 2);
-    lv_obj_set_style_line_color(br, lv_color_make(0xDD, 0xDD, 0xDD), 0);
-    lv_obj_set_style_line_width(br, 5, 0);
-    lv_obj_set_style_line_rounded(br, true, 0);
-
-    static const struct { int w, y; } top_sand[] = {
-        { 50, 32 }, { 38, 38 }, { 26, 44 }, { 14, 50 },
-    };
-    for (size_t i = 0; i < sizeof(top_sand) / sizeof(top_sand[0]); i++) {
-        lv_obj_t *s = lv_obj_create(tile);
-        lv_obj_set_size(s, top_sand[i].w, 4);
-        lv_obj_set_style_radius(s, 1, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(s, lv_color_make(0xFF, 0xCC, 0x00), LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(s, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_border_width(s, 0, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(s, 0, LV_PART_MAIN);
-        lv_obj_clear_flag(s, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_align(s, LV_ALIGN_TOP_MID, 0, top_sand[i].y);
-    }
-
-    lv_obj_t *stream = lv_obj_create(tile);
-    lv_obj_set_size(stream, 3, 12);
-    lv_obj_set_style_radius(stream, 1, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(stream, lv_color_make(0xFF, 0xCC, 0x00), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(stream, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(stream, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(stream, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(stream, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(stream, LV_ALIGN_TOP_MID, 0, 68);
-
-    static const struct { int w, y; } bot_sand[] = {
-        { 14, 86 }, { 26, 92 }, { 38, 98 }, { 50, 104 },
-    };
-    for (size_t i = 0; i < sizeof(bot_sand) / sizeof(bot_sand[0]); i++) {
-        lv_obj_t *s = lv_obj_create(tile);
-        lv_obj_set_size(s, bot_sand[i].w, 4);
-        lv_obj_set_style_radius(s, 1, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(s, lv_color_make(0xFF, 0xCC, 0x00), LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(s, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_border_width(s, 0, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(s, 0, LV_PART_MAIN);
-        lv_obj_clear_flag(s, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_align(s, LV_ALIGN_TOP_MID, 0, bot_sand[i].y);
-    }
+    const int cx = 90, cy = 78;
+    const int top = cy - 30, bot = cy + 30, hw = 24;
+    ico_line(tile, cx - hw, top, cx + hw, top, 4, ICO_INK);
+    ico_line(tile, cx - hw, bot, cx + hw, bot, 4, ICO_INK);
+    ico_line(tile, cx - hw + 2, top + 2, cx, cy, 3, ICO_INK);
+    ico_line(tile, cx + hw - 2, top + 2, cx, cy, 3, ICO_INK);
+    ico_line(tile, cx, cy, cx - hw + 2, bot - 2, 3, ICO_INK);
+    ico_line(tile, cx, cy, cx + hw - 2, bot - 2, 3, ICO_INK);
+    ico_line(tile, cx - 11, bot - 3, cx + 11, bot - 3, 4, ICO_ACCENT);
+    ico_dot(tile, cx, cy + 6, 5, ICO_ACCENT);
 }
 
-// Spiral-bound page calendar with red header, white body, and a 5×4 grid of
-// day cells with one painted gold as "today".
 static void draw_calendar_icon(lv_obj_t *tile)
 {
-    lv_obj_t *bar = lv_obj_create(tile);
-    lv_obj_set_size(bar, 84, 2);
-    lv_obj_set_style_bg_color(bar, lv_color_make(0x77, 0x77, 0x77), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(bar, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(bar, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 20);
-
-    for (int i = 0; i < 4; i++) {
-        lv_obj_t *ring = lv_obj_create(tile);
-        lv_obj_set_size(ring, 6, 10);
-        lv_obj_set_style_radius(ring, 3, LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(ring, LV_OPA_TRANSP, LV_PART_MAIN);
-        lv_obj_set_style_border_color(ring, lv_color_make(0xAA, 0xAA, 0xAA), LV_PART_MAIN);
-        lv_obj_set_style_border_width(ring, 2, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(ring, 0, LV_PART_MAIN);
-        lv_obj_clear_flag(ring, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_align(ring, LV_ALIGN_TOP_MID, -27 + i * 18, 16);
-    }
-
-    lv_obj_t *header = lv_obj_create(tile);
-    lv_obj_set_size(header, 72, 16);
-    lv_obj_set_style_radius(header, 2, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(header, lv_color_make(0xCC, 0x33, 0x33), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(header, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(header, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 30);
-
-    lv_obj_t *page = lv_obj_create(tile);
-    lv_obj_set_size(page, 72, 68);
-    lv_obj_set_style_radius(page, 2, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(page, lv_color_make(0xEE, 0xEE, 0xEE), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(page, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(page, lv_color_make(0xAA, 0xAA, 0xAA), LV_PART_MAIN);
-    lv_obj_set_style_border_width(page, 1, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(page, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(page, LV_ALIGN_TOP_MID, 0, 46);
-
-    const int today_row = 2, today_col = 3;
-    for (int r = 0; r < 4; r++) {
-        for (int c = 0; c < 5; c++) {
-            bool is_today = (r == today_row && c == today_col);
-            lv_obj_t *cell = lv_obj_create(tile);
-            lv_obj_set_size(cell, 8, 8);
-            lv_obj_set_style_radius(cell, 1, LV_PART_MAIN);
-            lv_obj_set_style_bg_color(cell,
-                is_today ? lv_color_make(0xFF, 0xCC, 0x00)
-                         : lv_color_make(0x66, 0x66, 0x66), LV_PART_MAIN);
-            lv_obj_set_style_bg_opa(cell, LV_OPA_COVER, LV_PART_MAIN);
-            lv_obj_set_style_border_width(cell, 0, LV_PART_MAIN);
-            lv_obj_set_style_pad_all(cell, 0, LV_PART_MAIN);
-            lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
-            lv_obj_set_pos(cell, 66 + c * 10, 56 + r * 10);
-        }
-    }
+    const int cx = 90, cy = 82, W = 70, H = 62;
+    ico_rrect(tile, cx, cy, W, H, 12, 3, ICO_INK, false);
+    ico_line(tile, cx - W / 2 + 6, cy - H / 2 + 16, cx + W / 2 - 6, cy - H / 2 + 16, 2, ICO_DIM);
+    ico_line(tile, cx - 14, cy - H / 2 - 6, cx - 14, cy - H / 2 + 6, 4, ICO_INK);
+    ico_line(tile, cx + 14, cy - H / 2 - 6, cx + 14, cy - H / 2 + 6, 4, ICO_INK);
+    int gx[3] = { cx - 16, cx, cx + 16 };
+    int gy[2] = { cy + 4, cy + 20 };
+    for (int r = 0; r < 2; r++)
+        for (int ci = 0; ci < 3; ci++)
+            ico_dot(tile, gx[ci], gy[r], 7, (r == 0 && ci == 1) ? ICO_ACCENT : ICO_DIM);
 }
-
-// ---- Public API ------------------------------------------------------------
-
 void time_screen_create()
 {
     time_screen = lv_obj_create(NULL);
@@ -425,3 +229,4 @@ void time_screen_create()
 
 void time_screen_show()       { lv_scr_load(time_screen); }
 bool time_screen_is_active()  { return lv_screen_active() == time_screen; }
+
