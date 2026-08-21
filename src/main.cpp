@@ -877,6 +877,7 @@ static void dim_reset_activity()
     if (s_is_dimmed) {
         s_is_dimmed = false;
         instance.setBrightness(DEVICE_MAX_BRIGHTNESS_LEVEL);
+        if (face_mode == FACE_WAYFINDER) wayfinder_set_dim(false);
     }
 }
 
@@ -1851,6 +1852,11 @@ void loop()
         if (millis() - s_last_activity_ms >= s_dim_timeout_ms) {
             s_is_dimmed = true;
             instance.setBrightness(s_dim_brightness);
+            // AMOLED: on the Wayfinder, also drop to its low-power look — sweep
+            // off, complications hidden, no per-second ring repaint. Black
+            // pixels draw ~no power, so this saves beyond just lowering
+            // backlight. (battery win)
+            if (face_mode == FACE_WAYFINDER) wayfinder_set_dim(true);
         }
     }
 
