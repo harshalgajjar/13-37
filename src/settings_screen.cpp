@@ -11,6 +11,7 @@ void clock_screen_set_12h(bool use_12h);
 void clock_screen_set_matrix(bool enabled);
 void clock_screen_set_dim_timeout(uint32_t ms);
 void clock_screen_set_dim_brightness(uint8_t level);
+void clock_screen_set_brightness(uint8_t level);   // active (non-dim) brightness
 void clock_screen_set_show_day(bool show);
 void clock_screen_set_show_date(bool show);
 void clock_screen_set_show_ampm(bool show);
@@ -273,7 +274,7 @@ static void on_show_date_changed(lv_event_t *e)
 static void on_brightness_changed(lv_event_t *e)
 {
     s_brightness = lv_slider_get_value(brightness_slider);
-    instance.setBrightness((uint8_t)s_brightness);
+    clock_screen_set_brightness((uint8_t)s_brightness);  // main.cpp tracks it for un-dim
     int pct = (int)s_brightness * 100 / (int)DEVICE_MAX_BRIGHTNESS_LEVEL;
     lv_label_set_text_fmt(brightness_val_label, "%d%%", pct);
     // Save deferred to LV_EVENT_RELEASED — see on_slider_released.
@@ -1020,7 +1021,7 @@ void settings_screen_load()
             if (v > DEVICE_MAX_BRIGHTNESS_LEVEL) v = DEVICE_MAX_BRIGHTNESS_LEVEL;
             s_brightness = (int32_t)v;
             lv_slider_set_value(brightness_slider, v, LV_ANIM_OFF);
-            instance.setBrightness((uint8_t)v);
+            clock_screen_set_brightness((uint8_t)v);   // main.cpp tracks it for un-dim
             int pct = (int)v * 100 / (int)DEVICE_MAX_BRIGHTNESS_LEVEL;
             lv_label_set_text_fmt(brightness_val_label, "%d%%", pct);
         } else if (key == "analog_face") {
