@@ -824,6 +824,9 @@ static uint32_t s_dim_timeout_ms   = 0;   // 0 = disabled
 static uint8_t  s_dim_brightness   = DEVICE_MAX_BRIGHTNESS_LEVEL / 4;
 static uint32_t s_last_activity_ms = 0;
 static bool     s_is_dimmed        = false;
+// The user's configured (non-dim) brightness. Restored on un-dim so waking from
+// the dimmed state returns to the slider value instead of full brightness.
+static uint8_t  s_active_brightness = DEVICE_MAX_BRIGHTNESS_LEVEL;
 
 void clock_screen_set_dim_timeout(uint32_t ms)
 {
@@ -832,7 +835,7 @@ void clock_screen_set_dim_timeout(uint32_t ms)
     s_last_activity_ms = millis();
     if (s_is_dimmed) {
         s_is_dimmed = false;
-        instance.setBrightness(DEVICE_MAX_BRIGHTNESS_LEVEL);
+        instance.setBrightness(s_active_brightness);
     }
 }
 
@@ -843,12 +846,20 @@ void clock_screen_set_dim_brightness(uint8_t level)
     if (s_is_dimmed) instance.setBrightness(s_dim_brightness);
 }
 
+// Set the user's active (non-dim) brightness. Applied now if not dimmed, and
+// remembered so un-dim restores this value instead of full brightness.
+void clock_screen_set_brightness(uint8_t level)
+{
+    s_active_brightness = level;
+    if (!s_is_dimmed) instance.setBrightness(level);
+}
+
 static void dim_reset_activity()
 {
     s_last_activity_ms = millis();
     if (s_is_dimmed) {
         s_is_dimmed = false;
-        instance.setBrightness(DEVICE_MAX_BRIGHTNESS_LEVEL);
+        instance.setBrightness(s_active_brightness);
     }
 }
 
