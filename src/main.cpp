@@ -1617,8 +1617,12 @@ void setup()
     wardriver_screen_create();
     lv_obj_add_event_cb(clock_screen, on_clock_gesture, LV_EVENT_GESTURE, NULL);
     // Hold the boot splash to a minimum ~1.5 s, then reveal the clock.
+    // MUST be an instant load, not an animated one: boot_splash is deleted on the
+    // very next line, and a fade animation would still reference it (use-after-
+    // free -> hang mid-fade). Other screens reuse (don't delete) their previous
+    // screen, so their fade transitions are safe.
     while (millis() - boot_splash_ms < 1500) delay(10);
-    lv_scr_load_anim(clock_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
+    lv_scr_load(clock_screen);
     lv_obj_del(boot_splash);
     s_last_activity_ms = millis();
 
@@ -1688,11 +1692,12 @@ void setup()
     // after instance.begin() has finished bringing the BHI260 firmware up.
     clock_screen_set_motion_wake(true);
 
-    // Enable the onboard step counter (low rate — it accumulates on the sensor,
-    // not the CPU). If the loaded BHI260 firmware doesn't include it, enable()
-    // returns false and the Wayfinder face shows "--" for steps.
-    s_steps_ok = s_step_counter.enable(5.0f, 0);
-    Serial.printf("[wayfinder] step counter: %s\n", s_steps_ok ? "enabled" : "unavailable");
+    // NOTE: s_step_counter.enable() is DISABLED — it appears to hang setup on
+    // this unit (the loaded BHI260 firmware likely lacks the step-counter
+    // virtual sensor, and enable() blocks instead of failing). Steps show "--"
+    // until we bring it up safely (separate init / firmware check / timeout).
+    // s_steps_ok stays false.
+    // s_steps_ok = s_step_counter.enable(5.0f, 0);
 
     // Restore persisted settings from the SD card (if mounted and file exists).
     // Called after the default setBrightness so a saved brightness wins.
@@ -1876,11 +1881,7 @@ void loop()
     // Missing one 1Hz tick during a screen transition is invisible.
     if (millis() - last_update_ms >= 1000 && !lvgl_priority) {
         last_update_ms = millis();
-        // Only rebuild the clock/Wayfinder while the clock face is actually on
-        // screen — inside a tool screen it's hidden, so the per-second rebuild
-        // is wasted. clock_screen_show() refreshes it synchronously on return,
-        // so time is never stale when it reappears. (battery win)
-        if (lv_scr_act() == clock_screen) update_clock();
+        update_clock();
         alarm_tick();              // fires the alarm at the set time
         // These refresh the clock-screen status icons, which are fully covered
         // by the Wayfinder overlay when it's the active face — so skip their
@@ -1913,19 +1914,8 @@ void loop()
     // means a single screen transition takes 6+ loop iterations to fully
     // redraw - long enough that the user sees the old screen "freeze".
     lv_task_handler();
-    if (s_is_dimmed) {
-        // Idle/dimmed: nothing is animating (transitions only happen while the
-        // user is active), so pace the loop down to cut CPU duty cycle — the
-        // single biggest idle-battery win. motion_wake_poll() still runs once
-        // per iteration (~every 30 ms), plenty fast to catch a wrist raise, and
-        // touch wake stays sub-perceptible. (battery win)
-        delay(30);
-    } else {
-        // Active: three render passes for snappy screen transitions (each pass
-        // renders one partial-refresh tile; the panel needs ~6 for a full screen).
-        delay(2);
-        lv_task_handler();
-        delay(2);
-        lv_task_handler();
-    }
+    delay(2);
+    lv_task_handler();
+    delay(2);
+    lv_task_handler();
 }
