@@ -1,4 +1,5 @@
 #include "tools_screen.h"
+#include "ui_tile.h"
 #include "airtag.h"
 #include "flipper.h"
 #include "skimmer.h"
@@ -144,28 +145,7 @@ static lv_obj_t *make_tile(lv_obj_t *parent, const char *label_text)
     lv_obj_set_style_pad_all(tile, 0, LV_PART_MAIN);
     lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(tile, LV_OBJ_FLAG_CLICKABLE);
-
-    // Tactile press feedback: the tile brightens, gets an orange edge, and
-    // scales down slightly — smoothly animated so selection feels responsive.
-    lv_obj_set_style_transform_pivot_x(tile, 90, LV_PART_MAIN);
-    lv_obj_set_style_transform_pivot_y(tile, 90, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(tile, lv_color_make(0x1d, 0x1a, 0x16), LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(tile, lv_color_hex(0xff7b2e), LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_border_width(tile, 2, LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_transform_scale_x(tile, 244, LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_transform_scale_y(tile, 244, LV_PART_MAIN | LV_STATE_PRESSED);
-
-    static lv_style_transition_dsc_t s_tile_trans;
-    static bool s_tile_trans_init = false;
-    if (!s_tile_trans_init) {
-        static const lv_style_prop_t props[] = {
-            LV_STYLE_TRANSFORM_SCALE_X, LV_STYLE_TRANSFORM_SCALE_Y,
-            LV_STYLE_BORDER_COLOR, LV_STYLE_BORDER_WIDTH, LV_STYLE_BG_COLOR,
-            (lv_style_prop_t)0 };
-        lv_style_transition_dsc_init(&s_tile_trans, props, lv_anim_path_ease_out, 130, 0, NULL);
-        s_tile_trans_init = true;
-    }
-    lv_obj_set_style_transition(tile, &s_tile_trans, LV_PART_MAIN);
+    tile_apply_style(tile);   // consistent look + tactile press feedback
 
     lv_obj_t *lbl = lv_label_create(tile);
     lv_obj_set_style_text_color(lbl, lv_color_make(0xCC, 0xCC, 0xCC), LV_PART_MAIN);

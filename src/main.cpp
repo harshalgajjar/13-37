@@ -1892,8 +1892,19 @@ void loop()
     // means a single screen transition takes 6+ loop iterations to fully
     // redraw - long enough that the user sees the old screen "freeze".
     lv_task_handler();
-    delay(2);
-    lv_task_handler();
-    delay(2);
-    lv_task_handler();
+    if (s_is_dimmed) {
+        // Idle/dimmed: nothing is animating (transitions only happen while the
+        // user is active), so pace the loop down to cut CPU duty cycle — the
+        // single biggest idle-battery win. motion_wake_poll() still runs once
+        // per iteration (~every 30 ms), plenty fast to catch a wrist raise, and
+        // touch wake stays sub-perceptible. (battery win)
+        delay(30);
+    } else {
+        // Active: three render passes for snappy screen transitions (each pass
+        // renders one partial-refresh tile; the panel needs ~6 for a full screen).
+        delay(2);
+        lv_task_handler();
+        delay(2);
+        lv_task_handler();
+    }
 }

@@ -1,4 +1,5 @@
 #include "time_screen.h"
+#include "ui_tile.h"
 #include "alarm_screen.h"
 #include "stopwatch_screen.h"
 #include "timer_screen.h"
@@ -37,6 +38,7 @@ static lv_obj_t *make_tile(lv_obj_t *parent, const char *label_text)
     lv_obj_set_style_pad_all(tile, 0, LV_PART_MAIN);
     lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(tile, LV_OBJ_FLAG_CLICKABLE);
+    tile_apply_style(tile);   // consistent look + tactile press feedback
 
     lv_obj_t *lbl = lv_label_create(tile);
     lv_obj_set_style_text_color(lbl, lv_color_make(0xCC, 0xCC, 0xCC), LV_PART_MAIN);
