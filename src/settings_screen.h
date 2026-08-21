@@ -5,6 +5,10 @@ void settings_screen_create();
 void settings_screen_show();
 bool settings_screen_is_active();
 
+// Apply + persist a watch-face choice (0=Digital, 1=Analog, 2=Wayfinder).
+// Called by the swipeable face picker when the user confirms a face.
+void settings_apply_face(int mode);
+
 // Read /Settings/settings.txt from the SD card (if mounted) and apply each
 // value to the widgets and clock-screen setters. Safe to call when no card
 // or no file exists — it just does nothing.

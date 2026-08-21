@@ -53,6 +53,7 @@
 #include "flock.h"
 #include "matrix_bg.h"
 #include "nfc_icon.h"
+#include "wayfinder_face.h"
 
 static lv_obj_t *clock_screen;
 static lv_obj_t *time_label;
@@ -77,6 +78,13 @@ static lv_obj_t *hand_hour;
 static lv_obj_t *hand_min;
 static lv_obj_t *hand_sec;
 static bool      analog_face = false;
+
+// Watch-face selection. Digital + Analog are 13:37's originals; Wayfinder is the
+// added compass-instrument face, rendered in a full-screen overlay container.
+enum { FACE_DIGITAL = 0, FACE_ANALOG = 1, FACE_WAYFINDER = 2 };
+static int       face_mode = FACE_DIGITAL;
+static lv_obj_t *wayfinder_container = nullptr;
+
 static uint32_t last_update_ms   = 0;
 static int      clock_utc_offset = 0; // hours, set after GPS fix
 static bool     manual_time_override = false; // user-set time; blocks GPS sync
@@ -628,22 +636,42 @@ static void on_clock_gesture(lv_event_t *e)
     }
 }
 
-// Called by settings screen to switch between digital and analog face
+// Switch the watch face. mode: FACE_DIGITAL / FACE_ANALOG / FACE_WAYFINDER.
+void clock_screen_set_face(int mode)
+{
+    face_mode = mode;
+    analog_face = (mode == FACE_ANALOG);   // kept for the rest of 13:37's logic
+
+    struct tm t;
+    instance.rtc.getDateTime(&t);
+    if (clock_utc_offset != 0) { t.tm_hour += clock_utc_offset; mktime(&t); }
+
+    if (mode == FACE_WAYFINDER) {
+        lv_obj_add_flag(time_label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(analog_container, LV_OBJ_FLAG_HIDDEN);
+        if (wayfinder_container) {
+            lv_obj_move_foreground(wayfinder_container);   // ensure top z-order
+            lv_obj_clear_flag(wayfinder_container, LV_OBJ_FLAG_HIDDEN);
+            wayfinder_update(&t);
+        }
+    } else {
+        if (wayfinder_container)
+            lv_obj_add_flag(wayfinder_container, LV_OBJ_FLAG_HIDDEN);
+        if (mode == FACE_ANALOG) {
+            lv_obj_add_flag(time_label, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(analog_container, LV_OBJ_FLAG_HIDDEN);
+            update_analog_clock(&t);
+        } else {
+            lv_obj_clear_flag(time_label, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(analog_container, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+// Back-compat shim: 13:37's original binary toggle maps onto the 3-way selector.
 void clock_screen_set_analog_face(bool analog)
 {
-    analog_face = analog;
-    if (analog) {
-        lv_obj_add_flag(time_label, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(analog_container, LV_OBJ_FLAG_HIDDEN);
-        // Immediately drive hands to the current time
-        struct tm t;
-        instance.rtc.getDateTime(&t);
-        if (clock_utc_offset != 0) { t.tm_hour += clock_utc_offset; mktime(&t); }
-        update_analog_clock(&t);
-    } else {
-        lv_obj_clear_flag(time_label, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(analog_container, LV_OBJ_FLAG_HIDDEN);
-    }
+    clock_screen_set_face(analog ? FACE_ANALOG : FACE_DIGITAL);
 }
 
 // Called by the LoRa screen when LoRa power is toggled, for an immediate icon
@@ -1114,6 +1142,11 @@ static void update_clock()
         mktime(&t);
     }
 
+    if (face_mode == FACE_WAYFINDER) {
+        wayfinder_update(&t);   // Wayfinder owns its own time/date/complications
+        return;
+    }
+
     if (analog_face) {
         update_analog_clock(&t);
     } else {
@@ -1339,6 +1372,13 @@ void setup()
                                            /*hand_rotation_deci_deg=*/-450);  // 10:30
     lv_obj_align(timer_indicator,     LV_ALIGN_BOTTOM_MID, -158, -10);
     build_analog_clock(clock_screen);
+
+    // Wayfinder face: a full-screen overlay on top of all the clock chrome.
+    // Created hidden; clock_screen_set_face() brings it to the front and shows
+    // it, so switching faces needs no per-widget hiding of 13:37's indicators.
+    wayfinder_container = lv_obj_create(clock_screen);
+    lv_obj_add_flag(wayfinder_container, LV_OBJ_FLAG_HIDDEN);
+    wayfinder_build(wayfinder_container);
 
     // AirTag scanner indicator — flex row of disc-icon + count. Hidden until
     // airtag_is_running(); update_airtag_indicator() positions it left of the

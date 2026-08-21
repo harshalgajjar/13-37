@@ -1,5 +1,6 @@
 #include "settings_screen.h"
 #include "usb_sd.h"
+#include "face_picker_screen.h"
 #include <LilyGoLib.h>
 #include <SD.h>
 #include <time.h>
@@ -7,6 +8,7 @@
 // Defined in main.cpp
 void main_loop_request_lvgl_priority(int cycles);
 void clock_screen_set_analog_face(bool analog);
+void clock_screen_set_face(int mode);   // 0=Digital 1=Analog 2=Wayfinder
 void clock_screen_set_12h(bool use_12h);
 void clock_screen_set_matrix(bool enabled);
 void clock_screen_set_dim_timeout(uint32_t ms);
@@ -29,7 +31,7 @@ static lv_obj_t *settings_screen;
 static lv_obj_t *brightness_slider;
 static lv_obj_t *brightness_val_label;
 static int32_t   s_brightness = DEVICE_MAX_BRIGHTNESS_LEVEL;
-static lv_obj_t *face_switch;
+static int       s_face_mode = 0;   // 0=Digital 1=Analog 2=Wayfinder
 static lv_obj_t *face_val_label;
 static lv_obj_t *hour_format_row;
 static lv_obj_t *hour_format_switch;
@@ -135,7 +137,9 @@ static void register_manual_obj(lv_obj_t *obj)
 // they're invisible.
 static void apply_layout()
 {
-    bool analog    = lv_obj_has_state(face_switch,        LV_STATE_CHECKED);
+    // The 12h / AM-PM / seconds rows only apply to the digital face, so they
+    // hide for Analog AND Wayfinder alike.
+    bool analog    = (s_face_mode != 0);
     bool manual_on = lv_obj_has_state(manual_time_switch, LV_STATE_CHECKED);
 
     if (analog) {
@@ -169,16 +173,33 @@ static const char *SETTINGS_PATH = "/Settings/settings.txt";
 // Forward declaration so the change callbacks can call it
 static void settings_save_to_sd();
 
-static void on_face_changed(lv_event_t *e)
+static const char *FACE_LABELS[3] = { "Digital", "Analog", "Wayfinder" };
+
+// Apply a face choice WITHOUT persisting — used by the settings loader, which
+// must not write the file it is reading.
+static void set_face_mode_internal(int mode)
 {
-    bool analog = lv_obj_has_state(face_switch, LV_STATE_CHECKED);
-    lv_label_set_text(face_val_label, analog ? "Analog" : "Digital");
-    clock_screen_set_analog_face(analog);
-    // 12h / AM-PM / Show-seconds rows are only relevant on the digital
-    // face. apply_layout hides them AND closes the resulting gap by
-    // shifting every row below up by 144 px.
+    if (mode < 0) mode = 0;
+    if (mode > 2) mode = 2;
+    s_face_mode = mode;
+    if (face_val_label) lv_label_set_text(face_val_label, FACE_LABELS[mode]);
+    clock_screen_set_face(mode);
+    // 12h / AM-PM / Show-seconds rows are only relevant on the digital face;
+    // apply_layout hides them AND closes the resulting gap.
     apply_layout();
+}
+
+// Public entry (settings_screen.h): apply + persist. Called by the face picker.
+void settings_apply_face(int mode)
+{
+    set_face_mode_internal(mode);
     settings_save_to_sd();
+}
+
+// The Watch Face row is a button now — tapping it opens the swipeable picker.
+static void on_face_row_clicked(lv_event_t *e)
+{
+    face_picker_show(s_face_mode);
 }
 
 static void on_hour_format_changed(lv_event_t *e)
@@ -459,15 +480,18 @@ void settings_screen_create()
     face_val_label = lv_label_create(face_row);
     lv_obj_set_style_text_color(face_val_label, lv_color_make(0xAA, 0xAA, 0xAA), LV_PART_MAIN);
     lv_obj_set_style_text_font(face_val_label, &lv_font_montserrat_20, LV_PART_MAIN);
-    lv_label_set_text(face_val_label, "Digital");
-    lv_obj_align(face_val_label, LV_ALIGN_RIGHT_MID, -80, 0);
+    lv_label_set_text(face_val_label, FACE_LABELS[s_face_mode]);
+    lv_obj_align(face_val_label, LV_ALIGN_RIGHT_MID, -26, 0);
 
-    face_switch = lv_switch_create(face_row);
-    lv_obj_set_size(face_switch, 70, 34);
-    lv_obj_set_style_bg_color(face_switch, lv_color_make(0x44, 0x44, 0x44), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(face_switch, lv_color_make(0x00, 0xCC, 0x66), LV_PART_MAIN | LV_STATE_CHECKED);
-    lv_obj_add_event_cb(face_switch, on_face_changed, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_align(face_switch, LV_ALIGN_RIGHT_MID, 0, 0);
+    // Chevron hints the row opens a sub-screen; the whole row is the button.
+    lv_obj_t *face_chevron = lv_label_create(face_row);
+    lv_obj_set_style_text_color(face_chevron, lv_color_make(0x66, 0x66, 0x66), LV_PART_MAIN);
+    lv_obj_set_style_text_font(face_chevron, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_label_set_text(face_chevron, LV_SYMBOL_RIGHT);
+    lv_obj_align(face_chevron, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    lv_obj_add_flag(face_row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(face_row, on_face_row_clicked, LV_EVENT_CLICKED, NULL);
 
     // Time format row — visible only when Digital face is active
     hour_format_row = lv_obj_create(settings_screen);
@@ -973,7 +997,7 @@ static void settings_save_to_sd()
     if (!f) return;
 
     f.printf("brightness=%d\n",      (int)s_brightness);
-    f.printf("analog_face=%d\n",     lv_obj_has_state(face_switch,        LV_STATE_CHECKED) ? 1 : 0);
+    f.printf("face_mode=%d\n",       s_face_mode);
     f.printf("format_12h=%d\n",      lv_obj_has_state(hour_format_switch, LV_STATE_CHECKED) ? 1 : 0);
     f.printf("show_ampm=%d\n",       lv_obj_has_state(ampm_switch,        LV_STATE_CHECKED) ? 1 : 0);
     f.printf("show_secs=%d\n",       lv_obj_has_state(secs_switch,        LV_STATE_CHECKED) ? 1 : 0);
@@ -1023,13 +1047,13 @@ void settings_screen_load()
             instance.setBrightness((uint8_t)v);
             int pct = (int)v * 100 / (int)DEVICE_MAX_BRIGHTNESS_LEVEL;
             lv_label_set_text_fmt(brightness_val_label, "%d%%", pct);
+        } else if (key == "face_mode") {
+            // New 3-way selector (Digital/Analog/Wayfinder). Applies without
+            // re-saving (we're mid-read of the same file).
+            set_face_mode_internal((int)v);
         } else if (key == "analog_face") {
-            apply_switch(face_switch, b);
-            lv_label_set_text(face_val_label, b ? "Analog" : "Digital");
-            // Honour the saved face state both for the clock and for the
-            // settings-screen layout reflow.
-            apply_layout();
-            clock_screen_set_analog_face(b);
+            // Legacy config from before the Wayfinder face — migrate.
+            set_face_mode_internal(b ? 1 : 0);
         } else if (key == "format_12h") {
             apply_switch(hour_format_switch, b);
             lv_label_set_text(hour_format_val_label, b ? "12h" : "24h");
