@@ -153,12 +153,22 @@ static void on_back(lv_event_t *e)
     settings_screen_show();
 }
 
+// Swipe down to go back — matches 13:37's clock/time screens so the gesture is
+// consistent across the firmware. Horizontal swipes still page the tileview.
+static void on_picker_gesture(lv_event_t *e)
+{
+    lv_indev_t *indev = lv_event_get_indev(e);
+    if (lv_indev_get_gesture_dir(indev) == LV_DIR_BOTTOM)
+        settings_screen_show();
+}
+
 static void build_screen(void)
 {
     picker_screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(picker_screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(picker_screen, LV_OPA_COVER, 0);
     lv_obj_clear_flag(picker_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(picker_screen, on_picker_gesture, LV_EVENT_GESTURE, NULL);
 
     lv_obj_t *title = lv_label_create(picker_screen);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
