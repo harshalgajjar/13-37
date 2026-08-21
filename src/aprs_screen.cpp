@@ -1,4 +1,5 @@
 #include "aprs_screen.h"
+#include "ui_kbd.h"
 #include "aprs.h"
 #include "lora_screen.h"
 #include <LilyGoLib.h>
@@ -330,6 +331,7 @@ void aprs_screen_create()
 
     // On-screen keyboard — hidden until the callsign field is focused
     keyboard = lv_keyboard_create(aprs_screen);
+    keyboard_fit_corners(keyboard);
     lv_obj_set_size(keyboard, 410, 240);
     lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_TEXT_UPPER);

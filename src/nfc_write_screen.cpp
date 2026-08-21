@@ -1,4 +1,5 @@
 #include "nfc_write_screen.h"
+#include "ui_kbd.h"
 #include <LilyGoLib.h>
 #include <string.h>
 
@@ -332,6 +333,7 @@ void nfc_write_screen_create()
 
     // On-screen keyboard — hidden until a field is focused
     keyboard = lv_keyboard_create(wr_screen);
+    keyboard_fit_corners(keyboard);
     lv_obj_set_size(keyboard, 410, 220);
     lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);

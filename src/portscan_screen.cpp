@@ -1,4 +1,5 @@
 #include "portscan_screen.h"
+#include "ui_kbd.h"
 #include "portscan.h"
 #include <LilyGoLib.h>
 #include <stdio.h>
@@ -466,6 +467,7 @@ void portscan_screen_create()
     // Shared on-screen keyboard for the lo/hi fields; hidden until either
     // text-area gets focus.
     keyboard = lv_keyboard_create(portscan_screen);
+    keyboard_fit_corners(keyboard);
     lv_obj_set_size(keyboard, lv_pct(100), 180);
     lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_event_cb(keyboard, on_kb_event, LV_EVENT_ALL, NULL);

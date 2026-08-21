@@ -1,4 +1,5 @@
 #include "send_message_screen.h"
+#include "ui_kbd.h"
 #include "meshtastic.h"
 #include "configuration_screen.h"
 #include "nodes_screen.h"
@@ -479,6 +480,7 @@ void send_message_screen_create()
     lv_obj_add_flag(compose_ta, LV_OBJ_FLAG_HIDDEN);
 
     keyboard = lv_keyboard_create(send_screen);
+    keyboard_fit_corners(keyboard);
     lv_obj_set_size(keyboard, 410, 240);
     lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
