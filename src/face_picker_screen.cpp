@@ -198,5 +198,6 @@ void face_picker_show(int current_mode)
     active_index = current_mode;
     lv_tileview_set_tile_by_index(tileview, current_mode, 0, LV_ANIM_OFF);
     refresh_dots();
-    lv_scr_load(picker_screen);
+    // Slide in from the right — a "drill-in" transition (250ms, only on nav).
+    lv_scr_load_anim(picker_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 250, 0, false);
 }

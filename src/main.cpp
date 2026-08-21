@@ -889,6 +889,12 @@ static void dim_reset_activity()
 // settings can switch it off if the user wants the dim timer to run even
 // while the watch is being worn.
 static SensorXYZ s_motion_accel(SensorBHI260AP::ACCEL_PASSTHROUGH, instance.sensor);
+
+// Hardware step counter (BHI260AP virtual sensor). Counts on the sensor's own
+// processor; the main CPU just reads the tally. Enabled once at boot; feeds the
+// Wayfinder face. s_steps_ok is false if the loaded firmware lacks the counter.
+static SensorStepCounter s_step_counter(instance.sensor);
+static bool s_steps_ok = false;
 static bool      s_motion_wake_enabled    = true;
 static bool      s_motion_accel_started   = false;
 static float     s_motion_last_mag        = 0.0f;
@@ -1143,6 +1149,8 @@ static void update_clock()
     }
 
     if (face_mode == FACE_WAYFINDER) {
+        wayfinder_set_stats(instance.pmu.getBatteryPercent(),
+                            s_steps_ok ? (long)s_step_counter.getStepCount() : -1);
         wayfinder_update(&t);   // Wayfinder owns its own time/date/complications
         return;
     }
@@ -1669,6 +1677,12 @@ void setup()
     // (rather than at the static-init / declaration site) means it happens
     // after instance.begin() has finished bringing the BHI260 firmware up.
     clock_screen_set_motion_wake(true);
+
+    // Enable the onboard step counter (low rate — it accumulates on the sensor,
+    // not the CPU). If the loaded BHI260 firmware doesn't include it, enable()
+    // returns false and the Wayfinder face shows "--" for steps.
+    s_steps_ok = s_step_counter.enable(5.0f, 0);
+    Serial.printf("[wayfinder] step counter: %s\n", s_steps_ok ? "enabled" : "unavailable");
 
     // Restore persisted settings from the SD card (if mounted and file exists).
     // Called after the default setBrightness so a saved brightness wins.
