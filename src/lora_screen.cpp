@@ -212,7 +212,7 @@ void lora_screen_create()
 
 void lora_screen_show()
 {
-    lv_scr_load(lora_screen);
+    lv_scr_load_anim(lora_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool lora_screen_is_active()

@@ -349,7 +349,7 @@ void nfc_write_screen_show()
     set_status("Boot button to return", lv_color_make(0xAA, 0xAA, 0xAA));
     hide_keyboard();
     update_type_fields();
-    lv_scr_load(wr_screen);
+    lv_scr_load_anim(wr_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool nfc_write_screen_is_active()

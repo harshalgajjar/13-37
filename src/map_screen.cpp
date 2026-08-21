@@ -582,7 +582,7 @@ void map_screen_show()
     // even if GPS is currently off or unlocked.
     load_last_fix();
     refresh(true);
-    lv_scr_load(map_screen);
+    lv_scr_load_anim(map_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool map_screen_is_active()

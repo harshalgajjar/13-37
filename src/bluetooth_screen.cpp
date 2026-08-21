@@ -246,7 +246,7 @@ void bluetooth_screen_create()
 
 void bluetooth_screen_show()
 {
-    lv_scr_load(bt_screen_root);
+    lv_scr_load_anim(bt_screen_root, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool bluetooth_screen_is_active()

@@ -293,7 +293,7 @@ static void on_tick(lv_timer_t *)
             // even if they navigated away while the timer was running —
             // same approach the alarm uses on fire.
             if (lv_screen_active() != timer_screen)
-                lv_scr_load(timer_screen);
+                lv_scr_load_anim(timer_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
             // Borrow the alarm's doorbell-loop chime at full volume — the
             // user explicitly wants the timer to be as loud and as urgent
             // as the morning alarm, regardless of what they've set the
@@ -606,7 +606,7 @@ void timer_screen_show()
     // the rollers while a timer is counting down behind them).
     if (s_state == TS_RUNNING || s_state == TS_PAUSED)
         update_running_ui();
-    lv_scr_load(timer_screen);
+    lv_scr_load_anim(timer_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool timer_screen_is_active()

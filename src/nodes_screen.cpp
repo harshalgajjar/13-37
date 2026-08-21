@@ -532,7 +532,7 @@ void nodes_screen_show()
 {
     main_loop_request_lvgl_priority(12);
     rebuild_list();
-    lv_scr_load(nodes_screen);
+    lv_scr_load_anim(nodes_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool nodes_screen_is_active()

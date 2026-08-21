@@ -499,7 +499,7 @@ void portscan_screen_show(uint32_t ip_host_order, const char *name)
     update_title();
     update_start_btn();
     update_status();
-    lv_scr_load(portscan_screen);
+    lv_scr_load_anim(portscan_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool portscan_screen_is_active()

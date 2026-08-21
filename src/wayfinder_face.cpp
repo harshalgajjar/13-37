@@ -33,8 +33,9 @@ typedef struct {
     lv_obj_t *card[4];
     lv_obj_t *batt_cont, *steps_cont;
     struct tm now;
-    int  batt_pct;
-    long steps;
+    int  batt_pct, shown_batt;
+    long steps, shown_steps;
+    bool shown_dim;
     bool built, dim, night;
 } wf_t;
 
@@ -211,19 +212,27 @@ void wayfinder_update(const struct tm *t)
     snprintf(buf, sizeof buf, "%s %d", days[t->tm_wday % 7], t->tm_mday);
     lv_label_set_text(S.date_lbl, buf);
 
-    lv_color_t vc = S.dim ? COL_INK2 : (S.night ? COL_RED_INK : COL_WHITE);
+    // Rebuilding curved text means destroying + recreating ~8 glyph labels, so
+    // only do it when a value (or the dim palette) actually changed — not every
+    // second. This keeps the once-a-second tick cheap. (battery win)
+    if (S.batt_pct != S.shown_batt || S.steps != S.shown_steps || S.dim != S.shown_dim) {
+        lv_color_t vc = S.dim ? COL_INK2 : (S.night ? COL_RED_INK : COL_WHITE);
+        char batt[12], steps[16];
+        if (S.batt_pct < 0) snprintf(batt, sizeof batt, "--");
+        else                snprintf(batt, sizeof batt, "%d%%", S.batt_pct);
+        fmt_steps(S.steps, steps, sizeof steps);
+        set_curved_text(S.batt_cont,  batt,  &lv_font_montserrat_28, vc, R_COMP, 137.0f, 6.5f);
+        set_curved_text(S.steps_cont, steps, &lv_font_montserrat_28, vc, R_COMP, 43.0f, 6.5f);
+        lv_obj_set_style_opa(S.batt_cont,  S.dim ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+        lv_obj_set_style_opa(S.steps_cont, S.dim ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+        S.shown_batt = S.batt_pct;
+        S.shown_steps = S.steps;
+        S.shown_dim = S.dim;
+    }
 
-    char batt[12], steps[16];
-    if (S.batt_pct < 0) snprintf(batt, sizeof batt, "--");
-    else                snprintf(batt, sizeof batt, "%d%%", S.batt_pct);
-    fmt_steps(S.steps, steps, sizeof steps);
-
-    set_curved_text(S.batt_cont,  batt,  &lv_font_montserrat_28, vc, R_COMP, 137.0f, 6.5f);
-    set_curved_text(S.steps_cont, steps, &lv_font_montserrat_28, vc, R_COMP, 43.0f, 6.5f);
-    lv_obj_set_style_opa(S.batt_cont,  S.dim ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
-    lv_obj_set_style_opa(S.steps_cont, S.dim ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
-
-    lv_obj_invalidate(S.ring);
+    // The second-sweep only animates when bright; in dim/AOD there's nothing
+    // moving, so don't repaint the ring every second. (battery win)
+    if (!S.dim) lv_obj_invalidate(S.ring);
 }
 
 static void wf_restyle(void)
@@ -238,6 +247,7 @@ static void wf_restyle(void)
     for (int i = 1; i < 4; i++)
         lv_obj_set_style_text_color(S.card[i], S.night ? COL_RED_INK : COL_INK2, 0);
     wayfinder_update(&S.now);
+    lv_obj_invalidate(S.ring);   // force one repaint on dim/night transition
 }
 
 void wayfinder_set_dim(bool on)   { S.dim = on;   wf_restyle(); }

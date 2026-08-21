@@ -315,7 +315,7 @@ void nfc_screen_show()
     else
         lv_obj_clear_state(toggle_sw, LV_STATE_CHECKED);
     update_ui();
-    lv_scr_load(nfc_screen);
+    lv_scr_load_anim(nfc_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool nfc_screen_is_active()

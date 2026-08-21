@@ -389,7 +389,7 @@ void tpms_screen_show()
     update_freq_buttons();
     update_fmt_button();
     update_start_button();
-    lv_scr_load(tpms_screen);
+    lv_scr_load_anim(tpms_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool tpms_screen_is_active()

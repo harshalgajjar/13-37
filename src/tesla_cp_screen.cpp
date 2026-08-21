@@ -250,7 +250,7 @@ void tesla_cp_screen_show()
 {
     update_status("Tap to send", lv_color_make(0x88, 0x88, 0x88));
     update_send_btn_state();
-    lv_scr_load(tesla_cp_screen);
+    lv_scr_load_anim(tesla_cp_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool tesla_cp_screen_is_active()

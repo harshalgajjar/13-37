@@ -455,7 +455,7 @@ void lora_analyze_screen_show()
     update_status();
     update_legend();
     update_bars();
-    lv_scr_load(screen);
+    lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool lora_analyze_screen_is_active()

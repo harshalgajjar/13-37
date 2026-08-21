@@ -292,7 +292,7 @@ void calendar_screen_show()
     s_view_month = now.tm_mon  + 1;
     populate_grid();
 
-    lv_scr_load(calendar_screen);
+    lv_scr_load_anim(calendar_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool calendar_screen_is_active()

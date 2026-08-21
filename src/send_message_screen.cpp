@@ -568,7 +568,7 @@ void send_message_screen_show()
     hide_compose();
     hide_confirm();
     rebuild_list();
-    lv_scr_load(send_screen);
+    lv_scr_load_anim(send_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 void send_message_screen_show_to(uint32_t dest_node)
@@ -580,7 +580,7 @@ void send_message_screen_show_to(uint32_t dest_node)
     hide_compose();
     hide_confirm();
     rebuild_list();
-    lv_scr_load(send_screen);
+    lv_scr_load_anim(send_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool send_message_screen_is_active()

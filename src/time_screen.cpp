@@ -423,5 +423,5 @@ void time_screen_create()
     lv_obj_add_event_cb(time_screen, on_gesture, LV_EVENT_GESTURE, NULL);
 }
 
-void time_screen_show()       { lv_scr_load(time_screen); }
+void time_screen_show()       { lv_scr_load_anim(time_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false); }
 bool time_screen_is_active()  { return lv_screen_active() == time_screen; }

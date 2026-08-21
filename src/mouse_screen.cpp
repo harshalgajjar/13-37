@@ -230,7 +230,7 @@ void mouse_screen_show()
     update_start_button();
     update_status();
     update_trackpad();
-    lv_scr_load(mouse_screen);
+    lv_scr_load_anim(mouse_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool mouse_screen_is_active()

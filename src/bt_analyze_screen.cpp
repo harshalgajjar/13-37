@@ -314,7 +314,7 @@ void bt_analyze_screen_show()
 {
     start_analysis();
     refresh();
-    lv_scr_load(screen);
+    lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool bt_analyze_screen_is_active()

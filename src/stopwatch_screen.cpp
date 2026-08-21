@@ -262,7 +262,7 @@ void stopwatch_screen_create()
 
 void stopwatch_screen_show()
 {
-    lv_scr_load(stopwatch_screen);
+    lv_scr_load_anim(stopwatch_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool stopwatch_screen_is_active()

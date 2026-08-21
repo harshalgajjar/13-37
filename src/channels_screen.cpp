@@ -175,7 +175,7 @@ void channels_screen_create()
 void channels_screen_show()
 {
     rebuild_list();
-    lv_scr_load(ch_screen);
+    lv_scr_load_anim(ch_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool channels_screen_is_active()

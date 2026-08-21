@@ -243,7 +243,7 @@ void wifi_radio_screen_create()
 
 void wifi_radio_screen_show()
 {
-    lv_scr_load(wifi_screen_root);
+    lv_scr_load_anim(wifi_screen_root, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool wifi_radio_screen_is_active()

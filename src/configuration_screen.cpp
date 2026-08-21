@@ -650,7 +650,7 @@ void configuration_screen_show()
     lv_textarea_set_text(short_ta, meshtastic_get_short_name());
     hide_keyboard();
     configuration_screen_update();   // reflect current GPS state on entry
-    lv_scr_load(cfg_screen);
+    lv_scr_load_anim(cfg_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool configuration_screen_is_active()

@@ -1012,6 +1012,6 @@ void tools_screen_create()
 void tools_screen_show()
 {
     main_loop_request_lvgl_priority(12);
-    lv_scr_load(tools_screen);
+    lv_scr_load_anim(tools_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 bool tools_screen_is_active() { return lv_screen_active() == tools_screen; }

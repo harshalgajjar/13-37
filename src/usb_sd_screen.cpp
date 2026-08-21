@@ -277,7 +277,7 @@ void usb_sd_screen_show()
     // info, so it's worth paying ~50 ms once to give them a fresh value.
     recompute_usage();
     refresh();
-    lv_scr_load(usb_sd_screen);
+    lv_scr_load_anim(usb_sd_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool usb_sd_screen_is_active()

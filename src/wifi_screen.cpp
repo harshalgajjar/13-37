@@ -581,7 +581,7 @@ void wifi_screen_show()
     }
     update_status();
     update_buttons();
-    lv_scr_load(wifi_screen);
+    lv_scr_load_anim(wifi_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool wifi_screen_is_active()

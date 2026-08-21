@@ -1032,7 +1032,7 @@ void clock_screen_show()
     bool paused_matrix = matrix_bg_is_enabled();
     if (paused_matrix) matrix_bg_set_paused(true);
 
-    lv_scr_load(clock_screen);
+    lv_scr_load_anim(clock_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
     lv_obj_invalidate(clock_screen);
     // Synchronous full refresh. lv_scr_load defers rendering to the next
     // lv_task_handler, and in partial mode with a full-screen buffer the
@@ -1233,7 +1233,7 @@ void setup()
     lv_obj_set_style_text_color(boot_brand, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_text_font(boot_brand, &lv_font_montserrat_clock_96, LV_PART_MAIN);
     lv_obj_center(boot_brand);
-    lv_scr_load(boot_splash);
+    lv_scr_load(boot_splash);   // first frame at boot — instant, no animation
     lv_refr_now(NULL);                       // paint now; no timer handler in setup yet
     uint32_t boot_splash_ms = millis();
 
@@ -1608,7 +1608,7 @@ void setup()
     lv_obj_add_event_cb(clock_screen, on_clock_gesture, LV_EVENT_GESTURE, NULL);
     // Hold the boot splash to a minimum ~1.5 s, then reveal the clock.
     while (millis() - boot_splash_ms < 1500) delay(10);
-    lv_scr_load(clock_screen);
+    lv_scr_load_anim(clock_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
     lv_obj_del(boot_splash);
     s_last_activity_ms = millis();
 

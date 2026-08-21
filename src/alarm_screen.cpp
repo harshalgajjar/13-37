@@ -612,7 +612,7 @@ void alarm_screen_show()
 
     // Always open scrolled to the top so the time-picker is in view first.
     lv_obj_scroll_to_y(settings_scr, 0, LV_ANIM_OFF);
-    lv_scr_load(settings_scr);
+    lv_scr_load_anim(settings_scr, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 void alarm_screen_show_ringing()
@@ -625,7 +625,7 @@ void alarm_screen_show_ringing()
     // label matches the action it actually performs.
     lv_label_set_text_fmt(snooze_btn_label, "SNOOZE %d min",
                           alarm_get_snooze_minutes());
-    lv_scr_load(ring_scr);
+    lv_scr_load_anim(ring_scr, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool alarm_screen_is_active()

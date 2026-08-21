@@ -569,7 +569,7 @@ void wardriver_screen_create()
 void wardriver_screen_show()
 {
     wardriver_screen_update();
-    lv_scr_load(wardriver_screen);
+    lv_scr_load_anim(wardriver_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool wardriver_screen_is_active()

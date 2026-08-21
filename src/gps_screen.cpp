@@ -352,7 +352,7 @@ void gps_screen_create()
 
 void gps_screen_show()
 {
-    lv_scr_load(gps_screen);
+    lv_scr_load_anim(gps_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool gps_screen_is_active()

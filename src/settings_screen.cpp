@@ -979,7 +979,7 @@ void settings_screen_show()
     lv_roller_set_selected(hour_roller,   (uint32_t)now.tm_hour,   LV_ANIM_OFF);
     lv_roller_set_selected(minute_roller, (uint32_t)now.tm_min,    LV_ANIM_OFF);
 
-    lv_scr_load(settings_screen);
+    lv_scr_load_anim(settings_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 // Rewrite /Settings/settings.txt with the current widget states. Called from

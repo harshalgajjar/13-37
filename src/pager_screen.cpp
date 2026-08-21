@@ -897,7 +897,7 @@ void pager_screen_show()
         lv_obj_clear_state(scan_switch, LV_STATE_CHECKED);
     update_mode_buttons();
     update_status();
-    lv_scr_load(pager_screen);
+    lv_scr_load_anim(pager_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool pager_screen_is_active()

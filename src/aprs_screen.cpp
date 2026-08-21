@@ -347,7 +347,7 @@ void aprs_screen_show()
     s_flash_until = 0;
     s_shown_count = -1;     // force a list rebuild on entry
     refresh();
-    lv_scr_load(aprs_screen);
+    lv_scr_load_anim(aprs_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
 }
 
 bool aprs_screen_is_active()
