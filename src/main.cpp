@@ -841,6 +841,13 @@ void clock_screen_set_vibrate(bool enabled)
     clock_vibrate = enabled;
 }
 
+// Short haptic tap for UI feedback (tile taps, face selection). Fire-and-forget
+// DRV2605 click; respects the user's vibrate setting so it's silent when off.
+void ui_haptic_tap()
+{
+    if (clock_vibrate) instance.vibrator();
+}
+
 // Called by settings screen to enable/disable the Matrix rain background
 void clock_screen_set_matrix(bool enabled)
 {

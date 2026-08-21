@@ -8,9 +8,11 @@
 #define UI_TILE_H
 
 #include <lvgl.h>
+#include "ui_haptic.h"
 
 static inline void tile_apply_style(lv_obj_t *tile)
 {
+    lv_obj_add_event_cb(tile, ui_haptic_cb, LV_EVENT_CLICKED, NULL);  // buzz on tap
     lv_obj_set_style_border_color(tile, lv_color_make(0x33, 0x33, 0x33), LV_PART_MAIN);
     lv_obj_set_style_radius(tile, 18, LV_PART_MAIN);
     lv_obj_set_style_transform_pivot_x(tile, 90, LV_PART_MAIN);

@@ -2,6 +2,7 @@
  * Swipeable watch-face picker — see face_picker_screen.h.
  */
 #include "face_picker_screen.h"
+#include "ui_haptic.h"
 #include "settings_screen.h"
 #include "wayfinder_face.h"
 #include <lvgl.h>
@@ -142,6 +143,7 @@ static void on_tile_changed(lv_event_t *e)
 
 static void on_select(lv_event_t *e)
 {
+    ui_haptic_tap();                 // confirm buzz
     settings_apply_face(active_index);
     settings_screen_show();
 }
