@@ -1869,14 +1869,22 @@ void loop()
         last_update_ms = millis();
         update_clock();
         alarm_tick();              // fires the alarm at the set time
-        layout_battery_indicators(); // pack alarm/stopwatch/timer icons R→L
-        update_battery();
-        update_lora_indicator();
-        update_bt_indicator();
-        update_wifi_indicator();
-        update_sd_indicator();
-        update_nfc_indicator();
-        update_scan_indicators();
+        // These refresh the clock-screen status icons, which are fully covered
+        // by the Wayfinder overlay when it's the active face — so skip their
+        // per-second I2C reads + widget updates then. All are display-only
+        // (verified: no low-battery/shutdown side effects), and they refresh on
+        // the next tick after switching back to the Digital/Analog face.
+        // (battery win)
+        if (face_mode != FACE_WAYFINDER) {
+            layout_battery_indicators(); // pack alarm/stopwatch/timer icons R→L
+            update_battery();
+            update_lora_indicator();
+            update_bt_indicator();
+            update_wifi_indicator();
+            update_sd_indicator();
+            update_nfc_indicator();
+            update_scan_indicators();
+        }
         if (!usb_sd_is_running())   // host owns the SD card while mounted
             wardriver_bg_tick();
         update_wardriver_indicator();

@@ -13,11 +13,13 @@
 
 static const char *FACE_NAMES[3] = { "Digital", "Analog", "Wayfinder" };
 
-static lv_obj_t *picker_screen = nullptr;
+static lv_obj_t *picker_screen  = nullptr;
 static lv_obj_t *tileview       = nullptr;
 static lv_obj_t *tiles[3]       = { nullptr, nullptr, nullptr };
 static lv_obj_t *dots[3]        = { nullptr, nullptr, nullptr };
+static lv_obj_t *cur_badge[3]   = { nullptr, nullptr, nullptr };
 static int       active_index   = 0;
+static int       current_face   = 0;   // the face actually in use (persisted)
 
 /* --- small analog-clock emblem for the Analog preview tile --- */
 static void analog_emblem_draw(lv_event_t *e)
@@ -98,6 +100,23 @@ static void build_tile(int idx, lv_obj_t *tile)
     lv_obj_set_style_text_font(name, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(name, lv_color_white(), 0);
     lv_label_set_text(name, FACE_NAMES[idx]);
+
+    // "In use" badge — shown on whichever face is currently active, so the user
+    // can see their current choice at a glance while swiping.
+    cur_badge[idx] = lv_label_create(tile);
+    lv_obj_set_style_text_font(cur_badge[idx], &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(cur_badge[idx], lv_color_hex(0xff7b2e), 0);
+    lv_label_set_text(cur_badge[idx], LV_SYMBOL_OK "  IN USE");
+    lv_obj_add_flag(cur_badge[idx], LV_OBJ_FLAG_HIDDEN);
+}
+
+static void refresh_current_badge(void)
+{
+    for (int i = 0; i < 3; i++) {
+        if (!cur_badge[i]) continue;
+        if (i == current_face) lv_obj_clear_flag(cur_badge[i], LV_OBJ_FLAG_HIDDEN);
+        else                   lv_obj_add_flag(cur_badge[i], LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static void refresh_dots(void)
@@ -196,8 +215,10 @@ void face_picker_show(int current_mode)
     if (current_mode > 2) current_mode = 2;
     if (!picker_screen) build_screen();
     active_index = current_mode;
+    current_face = current_mode;
     lv_tileview_set_tile_by_index(tileview, current_mode, 0, LV_ANIM_OFF);
     refresh_dots();
+    refresh_current_badge();
     // Slide in from the right — a "drill-in" transition (250ms, only on nav).
     lv_scr_load_anim(picker_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 250, 0, false);
 }
