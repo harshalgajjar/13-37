@@ -18,8 +18,14 @@ static lv_obj_t *tileview       = nullptr;
 static lv_obj_t *tiles[3]       = { nullptr, nullptr, nullptr };
 static lv_obj_t *dots[3]        = { nullptr, nullptr, nullptr };
 static lv_obj_t *cur_badge[3]   = { nullptr, nullptr, nullptr };
+static lv_obj_t *select_lbl     = nullptr;
 static int       active_index   = 0;
 static int       current_face   = 0;   // the face actually in use (persisted)
+
+static void update_select_label(void)
+{
+    if (select_lbl) lv_label_set_text_fmt(select_lbl, "USE %s", FACE_NAMES[active_index]);
+}
 
 /* --- small analog-clock emblem for the Analog preview tile --- */
 static void analog_emblem_draw(lv_event_t *e)
@@ -131,6 +137,7 @@ static void on_tile_changed(lv_event_t *e)
     lv_obj_t *act = lv_tileview_get_tile_active(tileview);
     for (int i = 0; i < 3; i++) if (tiles[i] == act) active_index = i;
     refresh_dots();
+    update_select_label();
 }
 
 static void on_select(lv_event_t *e)
@@ -194,6 +201,7 @@ static void build_screen(void)
     lv_obj_set_style_text_font(sl, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(sl, lv_color_black(), 0);
     lv_label_set_text(sl, "SELECT");
+    select_lbl = sl;
     lv_obj_center(sl);
 
     lv_obj_t *back_btn = lv_button_create(picker_screen);
@@ -219,6 +227,7 @@ void face_picker_show(int current_mode)
     lv_tileview_set_tile_by_index(tileview, current_mode, 0, LV_ANIM_OFF);
     refresh_dots();
     refresh_current_badge();
+    update_select_label();
     // Slide in from the right — a "drill-in" transition (250ms, only on nav).
     lv_scr_load_anim(picker_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 250, 0, false);
 }

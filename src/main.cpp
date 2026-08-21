@@ -1034,6 +1034,8 @@ void clock_screen_show()
     if (paused_matrix) matrix_bg_set_paused(true);
 
     lv_scr_load_anim(clock_screen, LV_SCR_LOAD_ANIM_FADE_IN, 160, 0, false);
+    update_clock();   // bring the time current now (the 1 Hz tick skips it while
+                      // the clock face is hidden — see the loop's 1 Hz block)
     lv_obj_invalidate(clock_screen);
     // Synchronous full refresh. lv_scr_load defers rendering to the next
     // lv_task_handler, and in partial mode with a full-screen buffer the
@@ -1867,7 +1869,11 @@ void loop()
     // Missing one 1Hz tick during a screen transition is invisible.
     if (millis() - last_update_ms >= 1000 && !lvgl_priority) {
         last_update_ms = millis();
-        update_clock();
+        // Only rebuild the clock/Wayfinder while the clock face is actually on
+        // screen — inside a tool screen it's hidden, so the per-second rebuild
+        // is wasted. clock_screen_show() refreshes it synchronously on return,
+        // so time is never stale when it reappears. (battery win)
+        if (lv_scr_act() == clock_screen) update_clock();
         alarm_tick();              // fires the alarm at the set time
         // These refresh the clock-screen status icons, which are fully covered
         // by the Wayfinder overlay when it's the active face — so skip their
