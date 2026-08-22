@@ -196,7 +196,9 @@ uint8_t  notify_ble_last_reason(void) { return s_last_reason; }
 void notify_ble_begin(void)
 {
     if (s_active) return;
-    BLEDevice::init("Bangle.js Ultra");   /* name prefix Gadgetbridge recognises */
+    BLEDevice::init("T-Watch Ultra");   /* NOTE: Gadgetbridge auto-detects Bangle.js
+                                           by a 'Bangle.js' name prefix; with this name
+                                           the device may need manual type selection. */
 
     /* Proven "Just Works" bonded pairing — copied from the working mouse HID.
      * Without a full security config, the SMP pairing request Android/Gadgetbridge
