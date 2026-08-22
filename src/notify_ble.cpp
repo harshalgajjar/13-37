@@ -206,10 +206,19 @@ void notify_ble_begin(void)
     rx->setCallbacks(new RxCb());
     svc->start();
 
+    /* Keep the NAME in the main 31-byte advertising packet. A 128-bit service
+     * UUID there would overflow the packet and drop the name — which is exactly
+     * how Gadgetbridge recognises a Bangle.js device, so it must be present.
+     * Put the UUID + appearance in the scan-response packet instead. */
     BLEAdvertising *adv = BLEDevice::getAdvertising();
-    adv->addServiceUUID(NUS_SVC);
-    adv->setAppearance(0x00C0);   /* Generic Watch — shows a watch icon, not a mouse */
-    adv->setScanResponse(true);
+    BLEAdvertisementData adv_data;
+    adv_data.setFlags(0x06);                       /* LE General Disc, no BR/EDR */
+    adv_data.setName(std::string("Bangle.js Ultra"));
+    adv->setAdvertisementData(adv_data);
+    BLEAdvertisementData scan_resp;
+    scan_resp.setAppearance(0x00C0);               /* Generic Watch icon */
+    scan_resp.setCompleteServices(BLEUUID(NUS_SVC));
+    adv->setScanResponseData(scan_resp);
     BLEDevice::startAdvertising();
     s_active = true;
 }
