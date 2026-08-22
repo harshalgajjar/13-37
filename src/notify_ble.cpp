@@ -173,9 +173,13 @@ class RxCb : public BLECharacteristicCallbacks {
 };
 
 class SrvCb : public BLEServerCallbacks {
-    void onConnect(BLEServer *) override { s_connected = true; }
+    void onConnect(BLEServer *) override {
+        s_connected = true;
+        Serial.println("[notify] >>> CONNECTED");
+    }
     void onDisconnect(BLEServer *) override {
         s_connected = false;
+        Serial.println("[notify] <<< DISCONNECTED (re-advertising)");
         if (s_active) BLEDevice::startAdvertising();
     }
 };
@@ -186,14 +190,18 @@ void notify_ble_begin(void)
     if (s_active) return;
     BLEDevice::init("Bangle.js Ultra");   /* name prefix Gadgetbridge recognises */
 
-    /* Secure, bonded pairing with a static passkey (MITM). Watch displays the
-     * PIN (DisplayOnly); the phone must enter it. */
-    BLEDevice::setSecurityCallbacks(new SecCb());
-    BLESecurity *sec = new BLESecurity();
-    sec->setStaticPIN(NOTIFY_PIN);
-    sec->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
-    sec->setCapability(ESP_IO_CAP_OUT);
-    sec->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+    /* Proven "Just Works" bonded pairing — copied from the working mouse HID.
+     * Without a full security config, the SMP pairing request Android/Gadgetbridge
+     * sends on connect has nothing to negotiate and the link drops ("cannot
+     * connect"). Both Init AND Resp encryption keys must be distributed or
+     * bonding fails (see mouse_hid.cpp). No PIN yet — get the link up first;
+     * upgrade to a passkey (IO_CAP_OUT + MITM) once mirroring works. */
+    BLESecurity *security = new BLESecurity();
+    security->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_BOND);
+    security->setCapability(ESP_IO_CAP_NONE);
+    security->setKeySize(16);
+    security->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+    security->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
 
     s_server = BLEDevice::createServer();
     s_server->setCallbacks(new SrvCb());
@@ -221,6 +229,7 @@ void notify_ble_begin(void)
     adv->setScanResponseData(scan_resp);
     BLEDevice::startAdvertising();
     s_active = true;
+    Serial.println("[notify] advertising as 'Bangle.js Ultra' (NUS, no security)");
 }
 
 void notify_ble_stop(void)
