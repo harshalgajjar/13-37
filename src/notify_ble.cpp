@@ -164,6 +164,13 @@ void notify_ble_call_reject(void)
     call_ring_stop();
 }
 
+/* Find Phone: ask Gadgetbridge to ring the phone (n:true) or stop (n:false). */
+void notify_ble_find_phone(bool on)
+{
+    notify_ble_send_line(on ? "{\"t\":\"findPhone\",\"n\":true}"
+                            : "{\"t\":\"findPhone\",\"n\":false}");
+}
+
 /* Nordic UART Service */
 #define NUS_SVC "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 #define NUS_RX  "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  /* phone -> watch (write)  */

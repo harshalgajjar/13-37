@@ -35,6 +35,7 @@ bool notify_ble_paired(void);     /* did the last pairing complete (PIN accepted
 bool notify_ble_call_ringing(void); /* is a call currently ringing on the watch? */
 void notify_ble_call_silence(void); /* stop the watch ring; phone keeps ringing  */
 void notify_ble_call_reject(void);  /* decline the call on the phone + stop ring  */
+void notify_ble_find_phone(bool on);/* ring the phone via Gadgetbridge (on/off)   */
 
 /* Diagnostics (shown on the Notify screen while debugging the link). */
 uint32_t notify_ble_connects(void);     /* # of GATT connects seen        */

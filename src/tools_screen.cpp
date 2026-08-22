@@ -1,5 +1,6 @@
 #include "tools_screen.h"
 #include "notify_screen.h"
+#include "find_phone_screen.h"
 #include "airtag.h"
 #include "flipper.h"
 #include "skimmer.h"
@@ -270,6 +271,13 @@ static void draw_notify_icon(lv_obj_t *t){
     lv_label_set_text(l, LV_SYMBOL_BELL);
     lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 34);
 }
+static void draw_findphone_icon(lv_obj_t *t){
+    lv_obj_t *l = lv_label_create(t);
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(l, ICO_INK, 0);
+    lv_label_set_text(l, LV_SYMBOL_CALL);
+    lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 34);
+}
 
 void tools_screen_create()
 {
@@ -316,6 +324,7 @@ void tools_screen_create()
     // at the bottom of this grid; they moved to the TIME screen (swipe up
     // from the clock face).
     lv_obj_t *t_notify  = make_tile(grid, "Notify");
+    lv_obj_t *t_findph  = make_tile(grid, "Find Phone");
     lv_obj_t *t_wifi    = make_tile(grid, "WiFi");
     lv_obj_t *t_analyze = make_tile(grid, "Analyze");
     lv_obj_t *t_mouse   = make_tile(grid, "Mouse");
@@ -331,6 +340,7 @@ void tools_screen_create()
     t_flock             = make_tile(grid, "Flock");
 
     draw_notify_icon(t_notify);
+    draw_findphone_icon(t_findph);
     draw_wifi_icon(t_wifi);
     draw_analyzer_icon(t_analyze);
     draw_mouse_icon(t_mouse);
@@ -347,6 +357,9 @@ void tools_screen_create()
 
     // Notify tile opens the mirrored-notifications screen.
     lv_obj_add_event_cb(t_notify, [](lv_event_t *) { notify_screen_show(); }, LV_EVENT_CLICKED, NULL);
+
+    // Find Phone tile rings the paired phone via Gadgetbridge.
+    lv_obj_add_event_cb(t_findph, [](lv_event_t *) { find_phone_screen_show(); }, LV_EVENT_CLICKED, NULL);
 
     // Tesla CP tile opens the 315 MHz charge-port-open transmit screen.
     lv_obj_add_event_cb(t_tesla, [](lv_event_t *) { tesla_cp_screen_show(); }, LV_EVENT_CLICKED, NULL);
