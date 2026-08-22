@@ -29,6 +29,11 @@ void notify_ble_begin(void);      /* init + advertise as a Bangle.js device */
 void notify_ble_stop(void);       /* tear down, release the BLE radio */
 bool notify_ble_active(void);     /* is the link enabled? */
 bool notify_ble_connected(void);  /* is a phone connected? */
+
+/* Diagnostics (shown on the Notify screen while debugging the link). */
+uint32_t notify_ble_connects(void);     /* # of GATT connects seen        */
+uint32_t notify_ble_disconnects(void);  /* # of disconnects               */
+uint8_t  notify_ble_last_reason(void);  /* last disconnect reason code    */
 void notify_ble_loop(void);       /* drain RX buffer; call from main loop */
 
 /* Send a raw JSON line to the phone (adds the trailing newline). */

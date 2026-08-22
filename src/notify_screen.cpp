@@ -87,14 +87,17 @@ static void update_status(void)
     bool conn = notify_ble_connected();
     lv_obj_set_style_bg_color(status_dot, conn ? COL_GOOD : COL_INK2, 0);
     if (conn) lv_label_set_text(status_lbl, "Connected");
-    else      lv_label_set_text_fmt(status_lbl, "Pair in Gadgetbridge \xC2\xB7 PIN %d", NOTIFY_PIN);
+    else      lv_label_set_text_fmt(status_lbl, "Waiting  c:%lu d:%lu r:0x%02X",
+                  (unsigned long)notify_ble_connects(),
+                  (unsigned long)notify_ble_disconnects(),
+                  notify_ble_last_reason());
     last_conn = conn;
 }
 
 static void on_refresh(lv_timer_t *)
 {
     if (notify_count() != last_shown) rebuild_list();
-    if (notify_ble_connected() != last_conn) update_status();
+    update_status();   /* live counts even when the connection state is unchanged */
 }
 
 void notify_screen_create()

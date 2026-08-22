@@ -172,17 +172,25 @@ class RxCb : public BLECharacteristicCallbacks {
     }
 };
 
+static volatile uint32_t s_connects    = 0;
+static volatile uint32_t s_disconnects = 0;
+static volatile uint8_t  s_last_reason = 0;
+
 class SrvCb : public BLEServerCallbacks {
-    void onConnect(BLEServer *) override {
-        s_connected = true;
-        Serial.println("[notify] >>> CONNECTED");
+    /* Use the param overloads so we can capture the disconnect reason code. */
+    void onConnect(BLEServer *, esp_ble_gatts_cb_param_t *) override {
+        s_connected = true; s_connects++;
     }
-    void onDisconnect(BLEServer *) override {
-        s_connected = false;
-        Serial.println("[notify] <<< DISCONNECTED (re-advertising)");
+    void onDisconnect(BLEServer *, esp_ble_gatts_cb_param_t *param) override {
+        s_connected = false; s_disconnects++;
+        if (param) s_last_reason = (uint8_t)param->disconnect.reason;
         if (s_active) BLEDevice::startAdvertising();
     }
 };
+
+uint32_t notify_ble_connects(void)    { return s_connects;    }
+uint32_t notify_ble_disconnects(void) { return s_disconnects; }
+uint8_t  notify_ble_last_reason(void) { return s_last_reason; }
 
 /* ---- public ---- */
 void notify_ble_begin(void)
@@ -214,22 +222,17 @@ void notify_ble_begin(void)
     rx->setCallbacks(new RxCb());
     svc->start();
 
-    /* Keep the NAME in the main 31-byte advertising packet. A 128-bit service
-     * UUID there would overflow the packet and drop the name — which is exactly
-     * how Gadgetbridge recognises a Bangle.js device, so it must be present.
-     * Put the UUID + appearance in the scan-response packet instead. */
+    /* Use the DEFAULT advertising path — exactly like the working mouse HID.
+     * The custom setAdvertisementData path skips the library's sequenced GAP
+     * config and can start advertising before the data is applied, which breaks
+     * connectability. With setScanResponse(true) the device name goes into the
+     * scan response (where it fits); we deliberately do NOT advertise the
+     * 128-bit NUS UUID (it would overflow) — Gadgetbridge finds us by name. */
     BLEAdvertising *adv = BLEDevice::getAdvertising();
-    BLEAdvertisementData adv_data;
-    adv_data.setFlags(0x06);                       /* LE General Disc, no BR/EDR */
-    adv_data.setName(std::string("Bangle.js Ultra"));
-    adv->setAdvertisementData(adv_data);
-    BLEAdvertisementData scan_resp;
-    scan_resp.setAppearance(0x00C0);               /* Generic Watch icon */
-    scan_resp.setCompleteServices(BLEUUID(NUS_SVC));
-    adv->setScanResponseData(scan_resp);
-    BLEDevice::startAdvertising();
+    adv->setAppearance(0x00C0);        /* Generic Watch icon */
+    adv->setScanResponse(true);        /* name -> scan response */
+    adv->start();
     s_active = true;
-    Serial.println("[notify] advertising as 'Bangle.js Ultra' (NUS, no security)");
 }
 
 void notify_ble_stop(void)
