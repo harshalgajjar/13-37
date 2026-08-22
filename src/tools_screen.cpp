@@ -1,4 +1,5 @@
 #include "tools_screen.h"
+#include "notify_screen.h"
 #include "airtag.h"
 #include "flipper.h"
 #include "skimmer.h"
@@ -261,6 +262,14 @@ static void draw_tesla_cp_icon(lv_obj_t *t){
     ico_line(t,cx+6,cy-22,cx-10,cy+2,4,ICO_ACCENT); ico_line(t,cx-10,cy+2,cx+2,cy+2,4,ICO_ACCENT);
     ico_line(t,cx+2,cy+2,cx-6,cy+24,4,ICO_ACCENT);
 }
+static void draw_notify_icon(lv_obj_t *t){
+    /* clean bell glyph for now; can go custom line-art later */
+    lv_obj_t *l = lv_label_create(t);
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(l, ICO_INK, 0);
+    lv_label_set_text(l, LV_SYMBOL_BELL);
+    lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 34);
+}
 
 void tools_screen_create()
 {
@@ -306,6 +315,7 @@ void tools_screen_create()
     // The timepiece tiles (Alarm / Stopwatch / Timer / Calendar) used to live
     // at the bottom of this grid; they moved to the TIME screen (swipe up
     // from the clock face).
+    lv_obj_t *t_notify  = make_tile(grid, "Notify");
     lv_obj_t *t_wifi    = make_tile(grid, "WiFi");
     lv_obj_t *t_analyze = make_tile(grid, "Analyze");
     lv_obj_t *t_mouse   = make_tile(grid, "Mouse");
@@ -320,6 +330,7 @@ void tools_screen_create()
     t_eviltwin          = make_tile(grid, "Evil Twin");
     t_flock             = make_tile(grid, "Flock");
 
+    draw_notify_icon(t_notify);
     draw_wifi_icon(t_wifi);
     draw_analyzer_icon(t_analyze);
     draw_mouse_icon(t_mouse);
@@ -333,6 +344,9 @@ void tools_screen_create()
     draw_skimmer_icon(t_skimmer);
     draw_eviltwin_icon(t_eviltwin);
     draw_flock_icon(t_flock);
+
+    // Notify tile opens the mirrored-notifications screen.
+    lv_obj_add_event_cb(t_notify, [](lv_event_t *) { notify_screen_show(); }, LV_EVENT_CLICKED, NULL);
 
     // Tesla CP tile opens the 315 MHz charge-port-open transmit screen.
     lv_obj_add_event_cb(t_tesla, [](lv_event_t *) { tesla_cp_screen_show(); }, LV_EVENT_CLICKED, NULL);

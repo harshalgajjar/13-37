@@ -17,6 +17,8 @@
 #include "settings_screen.h"
 #include "screenshot.h"
 #include "tools_screen.h"
+#include "notify_ble.h"
+#include "notify_screen.h"
 #include "tpms_screen.h"
 #include "timezone.h"
 #include "tpms.h"
@@ -1651,11 +1653,16 @@ void setup()
     // the WiFi auto-sync hook + background worker.
     timezone_load_on_boot();
     timezone_init();
+
+    // Notification link: advertise as a Bangle.js device so Gadgetbridge can
+    // pair and mirror phone notifications. Owns the BLE radio while active.
+    notify_ble_begin();
 }
 
 void loop()
 {
     instance.loop(); // required for power button and PMU event dispatch
+    notify_ble_loop();   // drain notification-link RX + update the store
     motion_wake_poll();   // accel-driven wake; no-op when toggle is off
     timezone_bg_tick();   // apply background WiFi NTP/geolocation results
     // Cheap on every iteration (an indev_state read + a millis() compare);
