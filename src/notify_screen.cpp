@@ -87,7 +87,7 @@ static void update_status(void)
     bool conn = notify_ble_connected();
     lv_obj_set_style_bg_color(status_dot, conn ? COL_GOOD : COL_INK2, 0);
     if (conn) lv_label_set_text(status_lbl, "Connected");
-    else      lv_label_set_text_fmt(status_lbl, "Waiting  c:%lu d:%lu r:0x%02X",
+    else      lv_label_set_text_fmt(status_lbl, "Advertising  c:%lu d:%lu r:0x%02X",
                   (unsigned long)notify_ble_connects(),
                   (unsigned long)notify_ble_disconnects(),
                   notify_ble_last_reason());
@@ -147,6 +147,7 @@ void notify_screen_create()
 void notify_screen_show()
 {
     if (!notify_screen) notify_screen_create();
+    if (!notify_ble_active()) notify_ble_begin();   /* start advertising on-demand */
     update_status();
     rebuild_list();
     if (!refr_timer) refr_timer = lv_timer_create(on_refresh, 1000, NULL);

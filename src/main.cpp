@@ -1653,10 +1653,9 @@ void setup()
     // the WiFi auto-sync hook + background worker.
     timezone_load_on_boot();
     timezone_init();
-
-    // Notification link: advertise as a Bangle.js device so Gadgetbridge can
-    // pair and mirror phone notifications. Owns the BLE radio while active.
-    notify_ble_begin();
+    // NOTE: the notification BLE link is now started on-demand when the Notify
+    // screen is opened (like the mouse HID tile), not at boot — starting BLE at
+    // boot left the device un-discoverable on some boots.
 }
 
 void loop()
