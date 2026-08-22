@@ -14,6 +14,7 @@
 
 #define NOTIFY_MAX      24     /* ring buffer of recent notifications */
 #define NOTIFY_TXT_MAX  120
+#define NOTIFY_PIN      133700 /* static BLE pairing passkey (shown on watch) */
 
 typedef struct {
     int32_t id;

@@ -86,7 +86,8 @@ static void update_status(void)
 {
     bool conn = notify_ble_connected();
     lv_obj_set_style_bg_color(status_dot, conn ? COL_GOOD : COL_INK2, 0);
-    lv_label_set_text(status_lbl, conn ? "Connected" : "Waiting for phone…");
+    if (conn) lv_label_set_text(status_lbl, "Connected");
+    else      lv_label_set_text_fmt(status_lbl, "Pair in Gadgetbridge \xC2\xB7 PIN %d", NOTIFY_PIN);
     last_conn = conn;
 }
 

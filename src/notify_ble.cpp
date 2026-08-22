@@ -7,7 +7,19 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include <BLESecurity.h>
 #include <string.h>
+
+/* Secure pairing: require a bonded, MITM-protected link. The watch "displays"
+ * a fixed passkey (NOTIFY_PIN) which the phone must enter — so a random device
+ * can't silently connect and read your notifications. */
+class SecCb : public BLESecurityCallbacks {
+    uint32_t onPassKeyRequest() override { return NOTIFY_PIN; }
+    void     onPassKeyNotify(uint32_t) override {}
+    bool     onSecurityRequest() override { return true; }
+    bool     onConfirmPIN(uint32_t) override { return true; }
+    void     onAuthenticationComplete(esp_ble_auth_cmpl_t) override {}
+};
 
 /* Nordic UART Service */
 #define NUS_SVC "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
@@ -173,6 +185,16 @@ void notify_ble_begin(void)
 {
     if (s_active) return;
     BLEDevice::init("Bangle.js Ultra");   /* name prefix Gadgetbridge recognises */
+
+    /* Secure, bonded pairing with a static passkey (MITM). Watch displays the
+     * PIN (DisplayOnly); the phone must enter it. */
+    BLEDevice::setSecurityCallbacks(new SecCb());
+    BLESecurity *sec = new BLESecurity();
+    sec->setStaticPIN(NOTIFY_PIN);
+    sec->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
+    sec->setCapability(ESP_IO_CAP_OUT);
+    sec->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+
     s_server = BLEDevice::createServer();
     s_server->setCallbacks(new SrvCb());
 
@@ -186,6 +208,7 @@ void notify_ble_begin(void)
 
     BLEAdvertising *adv = BLEDevice::getAdvertising();
     adv->addServiceUUID(NUS_SVC);
+    adv->setAppearance(0x00C0);   /* Generic Watch — shows a watch icon, not a mouse */
     adv->setScanResponse(true);
     BLEDevice::startAdvertising();
     s_active = true;
