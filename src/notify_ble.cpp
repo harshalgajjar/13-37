@@ -516,8 +516,20 @@ void notify_ble_send_line(const char *json)
 {
     if (!s_tx || !s_connected) return;
     String s(json); s += "\n";
-    s_tx->setValue((uint8_t *)s.c_str(), s.length());
-    s_tx->notify();
+    const uint8_t *p = (const uint8_t *)s.c_str();
+    size_t len = s.length();
+
+    /* A single GATT notification can only carry (ATT_MTU - 3) bytes; the minimum
+     * MTU is 23, so anything past 20 bytes gets silently truncated (that dropped
+     * the closing "}\n" off {"t":"call","n":"REJECT"}). Fragment into 20-byte
+     * chunks — Gadgetbridge reassembles until it sees the trailing newline. */
+    const size_t CHUNK = 20;
+    for (size_t off = 0; off < len; off += CHUNK) {
+        size_t n = (len - off < CHUNK) ? (len - off) : CHUNK;
+        s_tx->setValue((uint8_t *)(p + off), n);
+        s_tx->notify();
+        if (off + CHUNK < len) delay(12);   /* let the stack flush each packet */
+    }
 }
 
 void notify_ble_loop(void)
