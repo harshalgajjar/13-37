@@ -31,6 +31,11 @@ bool notify_ble_active(void);     /* is the link enabled? */
 bool notify_ble_connected(void);  /* is a phone connected? */
 bool notify_ble_paired(void);     /* did the last pairing complete (PIN accepted)? */
 
+/* Incoming-call controls (driven by the call banner). */
+bool notify_ble_call_ringing(void); /* is a call currently ringing on the watch? */
+void notify_ble_call_silence(void); /* stop the watch ring; phone keeps ringing  */
+void notify_ble_call_reject(void);  /* decline the call on the phone + stop ring  */
+
 /* Diagnostics (shown on the Notify screen while debugging the link). */
 uint32_t notify_ble_connects(void);     /* # of GATT connects seen        */
 uint32_t notify_ble_disconnects(void);  /* # of disconnects               */

@@ -226,52 +226,49 @@ bool notify_screen_is_active()
 
 /* ---- popup banner over any screen ---- */
 
+#define COL_REJECT  lv_color_hex(0xE5484D)
+#define COL_BTN     lv_color_hex(0x333338)
+
 static lv_obj_t *banner = nullptr;
+static bool      banner_is_call = false;   /* current banner is the call banner */
+static uint32_t  s_last_total = 0;
 
-static void banner_dismiss(lv_timer_t *t)
+static void banner_del(void)
 {
     if (banner) { lv_obj_del(banner); banner = nullptr; }
-    lv_timer_del(t);
+    banner_is_call = false;
 }
 
-static void banner_clicked(lv_event_t *e)
+static void banner_dismiss(lv_timer_t *t) { banner_del(); lv_timer_del(t); }
+static void banner_clicked(lv_event_t *e) { banner_del(); notify_screen_show(); }
+
+/* Build the shared card (attached to the active screen — not lv_layer_top, whose
+ * pixels get erased by this firmware's per-second partial clock repaint) with the
+ * source / title / body labels. Returns the card; caller adds a timer or buttons. */
+static lv_obj_t *build_banner_card(const notif_t *n)
 {
-    if (banner) { lv_obj_del(banner); banner = nullptr; }
-    notify_screen_show();
-}
+    lv_obj_t *card = lv_obj_create(lv_scr_act());
+    lv_obj_remove_style_all(card);
+    lv_obj_set_width(card, lv_pct(94));
+    lv_obj_set_height(card, LV_SIZE_CONTENT);
+    lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 8);
+    lv_obj_set_style_bg_color(card, COL_CARD, 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(card, 16, 0);
+    lv_obj_set_style_pad_all(card, 12, 0);
+    lv_obj_set_style_pad_row(card, 2, 0);
+    lv_obj_set_style_border_width(card, 2, 0);
+    lv_obj_set_style_border_color(card, COL_ACCENT, 0);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
-static void show_banner(const notif_t *n)
-{
-    if (banner) { lv_obj_del(banner); banner = nullptr; }
-
-    /* Attach to the ACTIVE screen (not lv_layer_top): this firmware repaints the
-     * clock with partial invalidations every second, and the top layer isn't
-     * re-composited over those, so a top-layer banner gets visually erased on the
-     * next tick. As a sibling of the clock widgets it composites reliably. */
-    banner = lv_obj_create(lv_scr_act());
-    lv_obj_remove_style_all(banner);
-    lv_obj_set_width(banner, lv_pct(94));
-    lv_obj_set_height(banner, LV_SIZE_CONTENT);
-    lv_obj_align(banner, LV_ALIGN_TOP_MID, 0, 8);
-    lv_obj_set_style_bg_color(banner, COL_CARD, 0);
-    lv_obj_set_style_bg_opa(banner, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(banner, 16, 0);
-    lv_obj_set_style_pad_all(banner, 12, 0);
-    lv_obj_set_style_pad_row(banner, 2, 0);
-    lv_obj_set_style_border_width(banner, 2, 0);
-    lv_obj_set_style_border_color(banner, COL_ACCENT, 0);
-    lv_obj_set_flex_flow(banner, LV_FLEX_FLOW_COLUMN);
-    lv_obj_clear_flag(banner, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(banner, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(banner, banner_clicked, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *src = lv_label_create(banner);
+    lv_obj_t *src = lv_label_create(card);
     lv_obj_set_style_text_font(src, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(src, COL_ACCENT, 0);
     lv_label_set_text(src, n->src[0] ? n->src : "Notification");
 
     if (n->title[0]) {
-        lv_obj_t *t = lv_label_create(banner);
+        lv_obj_t *t = lv_label_create(card);
         lv_obj_set_style_text_font(t, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(t, COL_INK, 0);
         lv_obj_set_width(t, lv_pct(100));
@@ -279,30 +276,97 @@ static void show_banner(const notif_t *n)
         lv_label_set_text(t, n->title);
     }
     if (n->body[0]) {
-        lv_obj_t *b = lv_label_create(banner);
+        lv_obj_t *b = lv_label_create(card);
         lv_obj_set_style_text_font(b, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(b, COL_INK2, 0);
         lv_obj_set_width(b, lv_pct(100));
         lv_label_set_long_mode(b, LV_LABEL_LONG_DOT);
         lv_label_set_text(b, n->body);
     }
+    return card;
+}
 
-    lv_obj_move_foreground(banner);                 /* above the clock widgets */
+static void show_banner(const notif_t *n)
+{
+    banner_del();
+    banner = build_banner_card(n);
+    banner_is_call = false;
+    lv_obj_add_flag(banner, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(banner, banner_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_move_foreground(banner);
     lv_timer_create(banner_dismiss, 6000, NULL);    /* auto-dismiss after 6 s */
+}
+
+/* Button callbacks just signal the BLE layer; the call banner is torn down by
+ * notify_ui_poll once the ring stops, so we never delete it mid-event. */
+static void call_silence_cb(lv_event_t *e) { notify_ble_call_silence(); }
+static void call_reject_cb (lv_event_t *e) { notify_ble_call_reject();  }
+
+static lv_obj_t *make_call_btn(lv_obj_t *row, const char *txt, lv_color_t bg,
+                               lv_color_t fg, lv_event_cb_t cb)
+{
+    lv_obj_t *btn = lv_button_create(row);
+    lv_obj_set_flex_grow(btn, 1);
+    lv_obj_set_height(btn, 46);
+    lv_obj_set_style_bg_color(btn, bg, 0);
+    lv_obj_set_style_radius(btn, 12, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *l = lv_label_create(btn);
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(l, fg, 0);
+    lv_label_set_text(l, txt);
+    lv_obj_center(l);
+    return btn;
+}
+
+static void show_call_banner(const notif_t *n)
+{
+    banner_del();
+    banner = build_banner_card(n);
+    banner_is_call = true;
+    lv_obj_set_style_border_color(banner, COL_GOOD, 0);   /* distinct from notifications */
+
+    lv_obj_t *row = lv_obj_create(banner);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_width(row, lv_pct(100));
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_top(row, 8, 0);
+    lv_obj_set_style_pad_column(row, 10, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    make_call_btn(row, "Silence", COL_BTN,    COL_INK,          call_silence_cb);
+    make_call_btn(row, "Reject",  COL_REJECT, lv_color_white(), call_reject_cb);
+
+    lv_obj_move_foreground(banner);
+    /* No auto-dismiss: notify_ui_poll removes it when the ring stops. */
 }
 
 void notify_ui_poll(void)
 {
-    static uint32_t last_total = 0;
+    /* Incoming-call banner: show it while ringing, and tear it down the instant
+     * the ring stops — whether by Reject, Silence, the phone ending the call, or
+     * the ring timeout. */
+    if (notify_ble_call_ringing()) {
+        if (!banner_is_call) {
+            const notif_t *n = notify_get(0);   /* the call entry is newest */
+            if (n) show_call_banner(n);
+            /* Don't let the call's store entry re-pop as a notification banner
+               after the call clears. */
+            s_last_total = notify_ble_total_added();
+        }
+        return;
+    }
+    if (banner_is_call) banner_del();
+
     uint32_t t = notify_ble_total_added();
-    if (t == last_total) { return; }
-    last_total = t;
+    if (t == s_last_total) return;
+    s_last_total = t;
     /* Don't stack a banner on top of the list screen — it's already visible there. */
     if (notify_screen_is_active()) return;
-    /* One banner at a time: an incoming call fires several BLE events in quick
-     * succession (ring + the dialer's notification); let the first ride out its
-     * timer instead of flickering as each event recreates it. */
-    if (banner) return;
+    if (banner) return;   /* one banner at a time */
     const notif_t *n = notify_get(0);   /* newest */
     if (n) show_banner(n);
 }

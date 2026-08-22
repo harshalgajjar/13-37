@@ -150,6 +150,20 @@ static void call_ring_tick(void)
     }
 }
 
+/* Call actions from the incoming-call banner (declared in notify_ble.h). */
+bool notify_ble_call_ringing(void) { return s_call_ringing; }
+
+/* Silence: stop the watch's ring/vibration only. The phone keeps ringing so the
+ * user can still answer it there. */
+void notify_ble_call_silence(void) { call_ring_stop(); }
+
+/* Reject: decline the call on the phone, then stop the local ring. */
+void notify_ble_call_reject(void)
+{
+    notify_ble_send_line("{\"t\":\"call\",\"n\":\"REJECT\"}");
+    call_ring_stop();
+}
+
 /* Nordic UART Service */
 #define NUS_SVC "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 #define NUS_RX  "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  /* phone -> watch (write)  */
