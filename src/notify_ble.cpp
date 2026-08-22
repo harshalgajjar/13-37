@@ -11,6 +11,8 @@
 #include <BLE2902.h>
 #include <BLESecurity.h>
 #include <esp_gap_ble_api.h>   /* esp_ble_gap_set_security_param, static passkey */
+#include <esp_bt.h>            /* esp_bt_controller_get_status — teardown detect */
+#include <WiFi.h>              /* WiFi.getMode — this build can't run WiFi + BLE  */
 #include <string.h>
 #include "ble_scan_manager.h"   /* ble_scan_active() — scanner arbitration */
 #include "mouse_hid.h"          /* take over the BLE radio from the mouse   */
@@ -398,8 +400,13 @@ uint32_t notify_ble_disconnects(void) { return s_disconnects; }
 uint8_t  notify_ble_last_reason(void) { return s_last_reason; }
 
 /* ---- public ---- */
+/* User intent: once notifications have been started, keep them alive across
+ * radio contention (WiFi/scanners/mouse) and rebuild automatically when free. */
+static bool s_want_on = false;
+
 bool notify_ble_begin(void)
 {
+    s_want_on = true;   /* remember the intent even if we can't start right now */
     if (s_active) return true;
     settings_load();   /* pull vibrate/sound/DND prefs off SD before RX starts */
 
@@ -471,6 +478,39 @@ void notify_ble_stop(void)
 
 bool notify_ble_active(void)    { return s_active; }
 bool notify_ble_connected(void) { return s_connected; }
+
+/* Keep-alive: called from the main loop. On this build WiFi and BLE can't share
+ * the radio, so starting a WiFi tool (or a BLE scanner, or the mouse) tears the
+ * BT controller down under us and the phone silently disconnects. This resumes
+ * the notification link automatically once the radio is free again, so the user
+ * doesn't have to reopen the Notify screen to get notifications back. */
+void notify_ble_keepalive(void)
+{
+    if (!s_want_on) return;
+
+    static uint32_t last_ms = 0;
+    uint32_t now = millis();
+    if (now - last_ms < 2000) return;   /* cheap: check a few times a minute */
+    last_ms = now;
+
+    /* If the controller was torn down out from under us, our flags are stale —
+     * clear them so we can rebuild cleanly. */
+    bool controller_down = (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE);
+    if (s_active && controller_down) {
+        s_active = false; s_connected = false; s_server = nullptr; s_tx = nullptr;
+    }
+
+    /* Stand down while another radio owner is active — don't fight WiFi or a
+     * scanner for the antenna; just wait for them to finish. */
+    if (ble_scan_active() || mouse_hid_is_running() || WiFi.getMode() != WIFI_MODE_NULL)
+        return;
+
+    if (!s_active) {
+        notify_ble_begin();               /* radio is free — bring the link back */
+    } else if (!s_connected) {
+        BLEDevice::startAdvertising();     /* up but unpaired — keep discoverable */
+    }
+}
 
 void notify_ble_send_line(const char *json)
 {

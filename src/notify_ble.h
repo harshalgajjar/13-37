@@ -44,6 +44,7 @@ uint8_t  notify_ble_last_reason(void);  /* last disconnect reason code    */
 uint32_t notify_ble_rx_bytes(void);     /* total bytes received from phone */
 uint32_t notify_ble_total_added(void);  /* monotonic count of stored notifs */
 void notify_ble_loop(void);       /* drain RX buffer; call from main loop */
+void notify_ble_keepalive(void);  /* rebuild the link after WiFi/scanners free the radio */
 
 /* Show a popup banner for newly-arrived notifications; call from main loop.
    Works over any active screen (draws on the LVGL top layer). */

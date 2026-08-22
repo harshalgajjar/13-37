@@ -1666,6 +1666,7 @@ void loop()
 {
     instance.loop(); // required for power button and PMU event dispatch
     notify_ble_loop();   // drain notification-link RX + update the store
+    notify_ble_keepalive(); // resume the link after WiFi/scanners release the radio
     notify_ui_poll();     // pop a banner over any screen when one arrives
     motion_wake_poll();   // accel-driven wake; no-op when toggle is off
     timezone_bg_tick();   // apply background WiFi NTP/geolocation results
