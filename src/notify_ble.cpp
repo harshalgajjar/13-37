@@ -421,6 +421,12 @@ bool notify_ble_begin(void)
      * user aliases it to "T-Watch Ultra" inside the app after pairing. */
     BLEDevice::init("Bangle.js T-Watch Ultra");
 
+    /* Raise our local MTU cap. The ESP32 default is 23 (20-byte notifications),
+     * which truncated outgoing JSON like {"t":"call","n":"REJECT"} to 24 bytes,
+     * losing the closing brace. With a high cap, Gadgetbridge (which requests a
+     * large MTU) negotiates up and each message fits in a single notification. */
+    BLEDevice::setMTU(512);
+
     s_server = BLEDevice::createServer();
     if (!s_server) { BLEDevice::deinit(false); return false; }
     s_server->setCallbacks(new SrvCb());
@@ -519,16 +525,17 @@ void notify_ble_send_line(const char *json)
     const uint8_t *p = (const uint8_t *)s.c_str();
     size_t len = s.length();
 
-    /* A single GATT notification can only carry (ATT_MTU - 3) bytes; the minimum
-     * MTU is 23, so anything past 20 bytes gets silently truncated (that dropped
-     * the closing "}\n" off {"t":"call","n":"REJECT"}). Fragment into 20-byte
-     * chunks — Gadgetbridge reassembles until it sees the trailing newline. */
-    const size_t CHUNK = 20;
-    for (size_t off = 0; off < len; off += CHUNK) {
-        size_t n = (len - off < CHUNK) ? (len - off) : CHUNK;
+    /* One GATT notification carries (negotiated ATT_MTU - 3) bytes. With the
+     * raised MTU cap this is typically hundreds of bytes, so short control
+     * messages go out in a single packet; larger ones still fragment safely
+     * (Gadgetbridge reassembles until the trailing newline). */
+    uint16_t mtu = s_server ? s_server->getPeerMTU(s_server->getConnId()) : 23;
+    size_t chunk = (mtu > 23) ? (size_t)(mtu - 3) : 20;
+    for (size_t off = 0; off < len; off += chunk) {
+        size_t n = (len - off < chunk) ? (len - off) : chunk;
         s_tx->setValue((uint8_t *)(p + off), n);
         s_tx->notify();
-        if (off + CHUNK < len) delay(12);   /* let the stack flush each packet */
+        if (off + chunk < len) delay(12);   /* let the stack flush each packet */
     }
 }
 
