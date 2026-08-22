@@ -1,5 +1,6 @@
 #include "mouse_hid.h"
 #include "ble_scan_manager.h"
+#include "notify_ble.h"
 
 #include <Arduino.h>
 #include <BLEDevice.h>
@@ -78,6 +79,9 @@ bool mouse_hid_start()
     // between this HID peripheral and the scan manager. Refuse if a scanner
     // (AirTag / wardriver) currently holds it.
     if (ble_scan_active()) return false;
+
+    // The notification link owns BLE via BLEDevice too — take the radio from it.
+    notify_ble_stop();
 
     BLEDevice::init("T-Watch Mouse");
 

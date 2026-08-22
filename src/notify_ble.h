@@ -25,19 +25,32 @@ typedef struct {
 } notif_t;
 
 /* Lifecycle */
-void notify_ble_begin(void);      /* init + advertise as a Bangle.js device */
+bool notify_ble_begin(void);      /* start advertising; false if a scanner holds BLE */
 void notify_ble_stop(void);       /* tear down, release the BLE radio */
 bool notify_ble_active(void);     /* is the link enabled? */
 bool notify_ble_connected(void);  /* is a phone connected? */
+bool notify_ble_paired(void);     /* did the last pairing complete (PIN accepted)? */
 
 /* Diagnostics (shown on the Notify screen while debugging the link). */
 uint32_t notify_ble_connects(void);     /* # of GATT connects seen        */
 uint32_t notify_ble_disconnects(void);  /* # of disconnects               */
 uint8_t  notify_ble_last_reason(void);  /* last disconnect reason code    */
+uint32_t notify_ble_rx_bytes(void);     /* total bytes received from phone */
+uint32_t notify_ble_total_added(void);  /* monotonic count of stored notifs */
 void notify_ble_loop(void);       /* drain RX buffer; call from main loop */
+
+/* Show a popup banner for newly-arrived notifications; call from main loop.
+   Works over any active screen (draws on the LVGL top layer). */
+void notify_ui_poll(void);
 
 /* Send a raw JSON line to the phone (adds the trailing newline). */
 void notify_ble_send_line(const char *json);
+
+/* User alert preferences (persisted to SD). Vibrate on by default, sound off,
+ * DND off. DND makes the watch ignore ALL incoming notifications and calls. */
+bool notify_get_vibrate(void);  void notify_set_vibrate(bool on);
+bool notify_get_sound(void);    void notify_set_sound(bool on);
+bool notify_get_dnd(void);      void notify_set_dnd(bool on);
 
 /* Store access for the UI (defined in notify_ble.cpp). */
 int            notify_count(void);

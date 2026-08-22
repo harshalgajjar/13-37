@@ -3,23 +3,152 @@
  * See notify_ble.h. Milestone 1: receive + store notifications (mirroring).
  */
 #include "notify_ble.h"
+#include <LilyGoLib.h>          /* instance.vibrator() — haptic ring on incoming call */
+#include <SD.h>                 /* persist alert settings                         */
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <BLESecurity.h>
+#include <esp_gap_ble_api.h>   /* esp_ble_gap_set_security_param, static passkey */
 #include <string.h>
+#include "ble_scan_manager.h"   /* ble_scan_active() — scanner arbitration */
+#include "mouse_hid.h"          /* take over the BLE radio from the mouse   */
+#include "alarm.h"              /* alarm_play_chime_loop() — reuse for the ringtone */
 
-/* Secure pairing: require a bonded, MITM-protected link. The watch "displays"
- * a fixed passkey (NOTIFY_PIN) which the phone must enter — so a random device
+extern void display_wake(void); /* main.cpp — un-dim so the banner is visible */
+
+/* ---- alert settings (vibrate / sound / do-not-disturb), persisted to SD ---- */
+#define NOTIFY_CFG_PATH "/notify.cfg"
+static bool s_vibrate = true;    /* buzz on notifications + calls   */
+static bool s_sound   = false;   /* play a ringtone/chime on alerts  */
+static bool s_dnd     = false;   /* ignore ALL incoming alerts       */
+static bool s_cfg_loaded = false;
+
+static void settings_save(void)
+{
+    if (!instance.isCardReady()) return;
+    File f = SD.open(NOTIFY_CFG_PATH, FILE_WRITE);
+    if (!f) return;
+    f.printf("vibrate=%d\nsound=%d\ndnd=%d\n", s_vibrate ? 1 : 0,
+             s_sound ? 1 : 0, s_dnd ? 1 : 0);
+    f.close();
+}
+
+static void settings_load(void)
+{
+    if (s_cfg_loaded || !instance.isCardReady()) return;
+    s_cfg_loaded = true;               /* only attempt once the card is ready */
+    File f = SD.open(NOTIFY_CFG_PATH, FILE_READ);
+    if (!f) return;
+    char line[32];
+    while (f.available()) {
+        size_t n = f.readBytesUntil('\n', line, sizeof(line) - 1);
+        line[n] = 0;
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = 0;
+        bool v = strtol(eq + 1, nullptr, 10) != 0;
+        if      (strcmp(line, "vibrate") == 0) s_vibrate = v;
+        else if (strcmp(line, "sound")   == 0) s_sound   = v;
+        else if (strcmp(line, "dnd")     == 0) s_dnd     = v;
+    }
+    f.close();
+}
+
+bool notify_get_vibrate(void) { settings_load(); return s_vibrate; }
+bool notify_get_sound(void)   { settings_load(); return s_sound;   }
+bool notify_get_dnd(void)     { settings_load(); return s_dnd;     }
+void notify_set_vibrate(bool on) { s_vibrate = on; settings_save(); }
+void notify_set_sound(bool on)   { s_sound = on;   settings_save();
+                                   if (!on) alarm_stop_chime_loop(); }
+void notify_set_dnd(bool on)     { s_dnd = on;     settings_save(); }
+
+/* Secure pairing: require a bonded, MITM-protected link. The watch DISPLAYS a
+ * fixed passkey (NOTIFY_PIN) which the phone must type in — so a random device
  * can't silently connect and read your notifications. */
+static volatile bool s_paired    = false;   /* last pairing succeeded  */
+static volatile bool s_pair_fail = false;   /* last pairing was rejected */
+
 class SecCb : public BLESecurityCallbacks {
+    /* IO_CAP_OUT means the *phone* enters the key, so onPassKeyRequest (device-
+     * as-input) isn't used; return the PIN anyway as a harmless fallback. */
     uint32_t onPassKeyRequest() override { return NOTIFY_PIN; }
+    /* Stack tells us the key to show; with a static passkey it's NOTIFY_PIN. */
     void     onPassKeyNotify(uint32_t) override {}
-    bool     onSecurityRequest() override { return true; }
+    bool     onSecurityRequest() override { return true; }   /* accept pairing */
     bool     onConfirmPIN(uint32_t) override { return true; }
-    void     onAuthenticationComplete(esp_ble_auth_cmpl_t) override {}
+    void     onAuthenticationComplete(esp_ble_auth_cmpl_t cmpl) override {
+        s_paired    =  cmpl.success;
+        s_pair_fail = !cmpl.success;
+    }
 };
+
+bool notify_ble_paired(void) { return s_paired; }
+
+/* Sentinel id for the single live-call entry, so end/accept/reject can find and
+ * clear it regardless of the notification id the phone used. */
+#define CALL_NOTIF_ID  0x7FFFFFFF
+
+/* Incoming-call ring: pulse the motor (and, if enabled, loop the chime) every
+ * INTERVAL while the phone rings, capped so a missed "end" can't buzz forever.
+ * A one-shot notification alert (SMS etc.) reuses the same chime but stops it
+ * after a short beep. */
+#define CALL_BUZZ_INTERVAL_MS  1200
+#define CALL_RING_TIMEOUT_MS   45000
+#define NOTIF_CHIME_MS         1400   /* one-shot chime length for a notification */
+static bool     s_call_ringing   = false;
+static uint32_t s_ring_start_ms  = 0;
+static uint32_t s_last_buzz_ms   = 0;
+static uint32_t s_notif_chime_off_ms = 0;  /* 0 = no one-shot chime pending */
+
+static void call_ring_start(void)
+{
+    if (s_call_ringing) return;   /* already ringing — don't reset the cadence */
+    s_call_ringing  = true;
+    s_ring_start_ms = millis();
+    s_last_buzz_ms  = 0;          /* 0 => buzz on the very next tick */
+    if (s_sound) alarm_play_chime_loop(0);   /* doorbell loop until the call clears */
+    display_wake();
+}
+
+static void call_ring_stop(void)
+{
+    s_call_ringing = false;
+    alarm_stop_chime_loop();
+}
+
+/* One-shot alert for a stored notification (not a call): a single buzz + a
+ * brief chime + wake the screen so the banner is seen. */
+static void notify_alert_once(void)
+{
+    if (s_vibrate) instance.vibrator();
+    if (s_sound && !s_call_ringing) {
+        alarm_play_chime_loop(0);
+        s_notif_chime_off_ms = millis() + NOTIF_CHIME_MS;
+    }
+    display_wake();
+}
+
+/* Called every main-loop iteration from notify_ble_loop(). */
+static void call_ring_tick(void)
+{
+    uint32_t now = millis();
+
+    /* Stop a one-shot notification chime once its window elapses (unless a call
+     * ring has since taken over the chime — then the ring owns it). */
+    if (s_notif_chime_off_ms && (int32_t)(now - s_notif_chime_off_ms) >= 0) {
+        s_notif_chime_off_ms = 0;
+        if (!s_call_ringing) alarm_stop_chime_loop();
+    }
+
+    if (!s_call_ringing) return;
+    if (now - s_ring_start_ms > CALL_RING_TIMEOUT_MS) { call_ring_stop(); return; }
+    if (s_vibrate && (s_last_buzz_ms == 0 || now - s_last_buzz_ms >= CALL_BUZZ_INTERVAL_MS)) {
+        s_last_buzz_ms = now;
+        instance.vibrator();      /* one haptic pulse (DRV2605) */
+    }
+}
 
 /* Nordic UART Service */
 #define NUS_SVC "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
@@ -38,8 +167,9 @@ static volatile size_t s_rx_len = 0;
 
 /* ---- notification store (ring buffer, newest first via s_head) ---- */
 static notif_t s_store[NOTIFY_MAX];
-static int     s_head  = 0;   /* index of next slot to write */
-static int     s_count = 0;
+static int      s_head  = 0;   /* index of next slot to write */
+static int      s_count = 0;
+static uint32_t s_total_added = 0;   /* monotonic: how many ever stored (for popups) */
 
 static void store_add(const notif_t *n)
 {
@@ -47,7 +177,10 @@ static void store_add(const notif_t *n)
     s_store[s_head].used = true;
     s_head = (s_head + 1) % NOTIFY_MAX;
     if (s_count < NOTIFY_MAX) s_count++;
+    s_total_added++;
 }
+
+uint32_t notify_ble_total_added(void) { return s_total_added; }
 
 static void store_dismiss(int32_t id)
 {
@@ -128,11 +261,30 @@ static int32_t json_int(const char *json, const char *key, int32_t dflt)
     return (*p == '-' || (*p >= '0' && *p <= '9')) ? (int32_t)strtol(p, nullptr, 10) : dflt;
 }
 
+/* True if a notification source is the phone/dialer app, whose call
+ * notifications duplicate our richer t:"call" handling. Matched loosely because
+ * Gadgetbridge reports the app's display name, which varies by phone/locale. */
+static bool is_dialer_src(const char *src)
+{
+    if (!src || !src[0]) return false;
+    char low[24];
+    size_t i = 0;
+    for (; src[i] && i < sizeof(low) - 1; i++)
+        low[i] = (src[i] >= 'A' && src[i] <= 'Z') ? src[i] + 32 : src[i];
+    low[i] = 0;
+    return strcmp(low, "phone") == 0 || strstr(low, "dialer") ||
+           strstr(low, "call screen") || strcmp(low, "call") == 0;
+}
+
 /* ---- protocol dispatch (called from loop, not the BLE task) ---- */
 static void handle_object(const char *json)
 {
     char t[24];
     if (!json_str(json, "t", t, sizeof t)) return;
+
+    /* Do Not Disturb: ignore every incoming notification and call. Dismissals
+     * (notify-) still pass through so the list stays in sync with the phone. */
+    if (s_dnd && strcmp(t, "notify-") != 0) return;
 
     if (strcmp(t, "notify") == 0) {
         notif_t n; memset(&n, 0, sizeof n);
@@ -141,11 +293,38 @@ static void handle_object(const char *json)
         json_str(json, "title",  n.title, sizeof n.title);
         json_str(json, "body",   n.body,  sizeof n.body);
         if (!n.title[0]) json_str(json, "sender", n.title, sizeof n.title);
+        /* Drop the dialer app's own call notification — we already surface calls
+         * from the richer t:"call" event (which carries the phone number), so the
+         * bare "Phone" duplicate would just clutter the list. */
+        if (is_dialer_src(n.src)) return;
         store_add(&n);
+        notify_alert_once();   /* buzz/chime + wake so the banner is seen */
     } else if (strcmp(t, "notify-") == 0) {   /* dismissed on phone */
         store_dismiss(json_int(json, "id", 0));
+    } else if (strcmp(t, "call") == 0) {
+        /* Live call state. Gadgetbridge sends cmd = incoming|outgoing|accept|
+         * start|end|reject with name/number. We surface an incoming ring as a
+         * store entry (so it pops a banner + lands in the list); the matching
+         * end/accept/reject clears it. Needs the phone-side Phone permission. */
+        char cmd[16] = {0};
+        json_str(json, "cmd", cmd, sizeof cmd);
+        if (strcmp(cmd, "incoming") == 0) {
+            notif_t n; memset(&n, 0, sizeof n);
+            n.id = CALL_NOTIF_ID;
+            strncpy(n.src, "Incoming call", sizeof n.src - 1);
+            json_str(json, "name",   n.title, sizeof n.title);
+            json_str(json, "number", n.body,  sizeof n.body);
+            if (!n.title[0]) { strncpy(n.title, n.body[0] ? n.body : "Unknown",
+                                       sizeof n.title - 1); n.body[0] = 0; }
+            store_dismiss(CALL_NOTIF_ID);   /* replace any stale ring */
+            store_add(&n);
+            call_ring_start();              /* buzz until answered/rejected/ended */
+        } else {                            /* end / accept / reject / start */
+            store_dismiss(CALL_NOTIF_ID);
+            call_ring_stop();
+        }
     }
-    /* other types (call, music, …) handled in later milestones */
+    /* other types (music, …) handled in later milestones */
 }
 
 /* pull the JSON object out of a line that may be wrapped as GB({...}) and/or
@@ -160,17 +339,22 @@ static void handle_line(char *line)
 }
 
 /* ---- BLE callbacks ---- */
+static volatile uint32_t s_rx_bytes = 0;   /* total bytes ever received from phone */
+
 class RxCb : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *c) override {
         uint8_t *d = c->getData();
         size_t   n = c->getLength();
         if (!d || !n) return;
         portENTER_CRITICAL(&s_mux);
+        s_rx_bytes += n;
         for (size_t i = 0; i < n && s_rx_len < sizeof(s_rx) - 1; i++)
             s_rx[s_rx_len++] = (char)d[i];
         portEXIT_CRITICAL(&s_mux);
     }
 };
+
+uint32_t notify_ble_rx_bytes(void) { return s_rx_bytes; }
 
 static volatile uint32_t s_connects    = 0;
 static volatile uint32_t s_disconnects = 0;
@@ -193,27 +377,24 @@ uint32_t notify_ble_disconnects(void) { return s_disconnects; }
 uint8_t  notify_ble_last_reason(void) { return s_last_reason; }
 
 /* ---- public ---- */
-void notify_ble_begin(void)
+bool notify_ble_begin(void)
 {
-    if (s_active) return;
-    BLEDevice::init("T-Watch Ultra");   /* NOTE: Gadgetbridge auto-detects Bangle.js
-                                           by a 'Bangle.js' name prefix; with this name
-                                           the device may need manual type selection. */
+    if (s_active) return true;
+    settings_load();   /* pull vibrate/sound/DND prefs off SD before RX starts */
 
-    /* Proven "Just Works" bonded pairing — copied from the working mouse HID.
-     * Without a full security config, the SMP pairing request Android/Gadgetbridge
-     * sends on connect has nothing to negotiate and the link drops ("cannot
-     * connect"). Both Init AND Resp encryption keys must be distributed or
-     * bonding fails (see mouse_hid.cpp). No PIN yet — get the link up first;
-     * upgrade to a passkey (IO_CAP_OUT + MITM) once mirroring works. */
-    BLESecurity *security = new BLESecurity();
-    security->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_BOND);
-    security->setCapability(ESP_IO_CAP_NONE);
-    security->setKeySize(16);
-    security->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
-    security->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+    /* BLE radio arbitration. The scanners own the controller via
+     * ble_scan_manager; the mouse owns it via BLEDevice. Only one holder at a
+     * time, so refuse if a scanner is active, and take over from the mouse. */
+    if (ble_scan_active()) return false;
+    if (mouse_hid_is_running()) mouse_hid_stop();
+
+    /* Name MUST start with "Bangle.js" — Gadgetbridge selects its notification
+     * protocol by name prefix, so anything else is filed as "unsupported". The
+     * user aliases it to "T-Watch Ultra" inside the app after pairing. */
+    BLEDevice::init("Bangle.js T-Watch Ultra");
 
     s_server = BLEDevice::createServer();
+    if (!s_server) { BLEDevice::deinit(false); return false; }
     s_server->setCallbacks(new SrvCb());
 
     BLEService *svc = s_server->createService(NUS_SVC);
@@ -222,24 +403,45 @@ void notify_ble_begin(void)
     BLECharacteristic *rx = svc->createCharacteristic(
         NUS_RX, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
     rx->setCallbacks(new RxCb());
+
+    /* Secure pairing with a displayed PIN. The watch shows NOTIFY_PIN and the
+     * phone must enter it (MITM protection), so a stranger can't silently bond
+     * and read your notifications. IO_CAP_OUT = "this device has a display".
+     * The passkey is fixed via ESP_BLE_SM_SET_STATIC_PASSKEY so it always matches
+     * what the Notify screen prints. Both encryption keys must still be
+     * distributed or bonding drops on the first report (learned from mouse HID). */
+    s_paired = false; s_pair_fail = false;
+    BLEDevice::setSecurityCallbacks(new SecCb());
+    uint32_t passkey = NOTIFY_PIN;
+    esp_ble_gap_set_security_param(ESP_BLE_SM_SET_STATIC_PASSKEY, &passkey, sizeof(passkey));
+
+    BLESecurity security;
+    security.setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);  /* MITM => PIN */
+    security.setCapability(ESP_IO_CAP_OUT);                        /* watch displays PIN */
+    security.setKeySize(16);
+    security.setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+    security.setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+
     svc->start();
 
-    /* Use the DEFAULT advertising path — exactly like the working mouse HID.
-     * The custom setAdvertisementData path skips the library's sequenced GAP
-     * config and can start advertising before the data is applied, which breaks
-     * connectability. With setScanResponse(true) the device name goes into the
-     * scan response (where it fits); we deliberately do NOT advertise the
-     * 128-bit NUS UUID (it would overflow) — Gadgetbridge finds us by name. */
+    /* Advertising mirrors the mouse exactly (proven discoverable + connectable):
+     * appearance + a small 16-bit service UUID + scan response carrying the name.
+     * We do NOT advertise the 128-bit NUS UUID (it broke discovery) — Gadgetbridge
+     * matches by name and discovers the NUS service over GATT after connecting. */
     BLEAdvertising *adv = BLEDevice::getAdvertising();
-    adv->setAppearance(0x00C0);        /* Generic Watch icon */
-    adv->setScanResponse(true);        /* name -> scan response */
+    adv->setAppearance(0x00C0);                       /* Generic Watch icon */
+    adv->addServiceUUID(BLEUUID((uint16_t)0x1811));   /* Alert Notification Service */
+    adv->setScanResponse(true);
     adv->start();
+
     s_active = true;
+    return true;
 }
 
 void notify_ble_stop(void)
 {
     if (!s_active) return;
+    call_ring_stop();
     BLEDevice::deinit(false);
     s_server = nullptr; s_tx = nullptr;
     s_active = false; s_connected = false;
@@ -259,6 +461,7 @@ void notify_ble_send_line(const char *json)
 
 void notify_ble_loop(void)
 {
+    call_ring_tick();       /* keep the call ring pulsing (independent of RX) */
     if (!s_active) return;
     /* copy out complete lines under the lock, parse outside it */
     static char work[2048];

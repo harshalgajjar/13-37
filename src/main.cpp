@@ -865,6 +865,10 @@ static void dim_reset_activity()
     }
 }
 
+// Public wake hook: un-dim the display so an arriving notification/call banner
+// is actually visible. Called from the notification link.
+void display_wake() { dim_reset_activity(); }
+
 // ---- Motion-wake ----------------------------------------------------------
 //
 // When enabled, the BHI260AP accelerometer is streamed at a low rate and any
@@ -1662,6 +1666,7 @@ void loop()
 {
     instance.loop(); // required for power button and PMU event dispatch
     notify_ble_loop();   // drain notification-link RX + update the store
+    notify_ui_poll();     // pop a banner over any screen when one arrives
     motion_wake_poll();   // accel-driven wake; no-op when toggle is off
     timezone_bg_tick();   // apply background WiFi NTP/geolocation results
     // Cheap on every iteration (an indev_state read + a millis() compare);

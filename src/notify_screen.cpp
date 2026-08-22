@@ -4,6 +4,7 @@
  * 1 Hz timer while visible. Reached from the Tools grid.
  */
 #include "notify_screen.h"
+#include "notify_settings_screen.h"
 #include "notify_ble.h"
 #include <lvgl.h>
 #include <LilyGoLib.h>
@@ -21,6 +22,7 @@ static lv_obj_t *notify_screen = nullptr;
 static lv_obj_t *list = nullptr;
 static lv_obj_t *status_dot = nullptr;
 static lv_obj_t *status_lbl = nullptr;
+static lv_obj_t *pin_lbl = nullptr;
 static lv_obj_t *empty_lbl = nullptr;
 static lv_timer_t *refr_timer = nullptr;
 static int last_shown = -1;
@@ -30,6 +32,19 @@ static void on_gesture(lv_event_t *e)
 {
     lv_indev_t *indev = lv_event_get_indev(e);
     if (lv_indev_get_gesture_dir(indev) == LV_DIR_BOTTOM) tools_screen_show();
+}
+
+static void rebuild_list(void);   /* fwd */
+
+static void on_clear(lv_event_t *e)
+{
+    notify_clear_all();
+    rebuild_list();
+}
+
+static void on_settings(lv_event_t *e)
+{
+    notify_settings_screen_show();
 }
 
 static void add_card(const notif_t *n)
@@ -84,9 +99,22 @@ static void rebuild_list(void)
 
 static void update_status(void)
 {
+    if (!notify_ble_active()) {   /* a scan tool holds the BLE radio */
+        lv_obj_set_style_bg_color(status_dot, COL_INK2, 0);
+        lv_label_set_text(status_lbl, "Bluetooth busy \xE2\x80\x94 close scan tools");
+        if (pin_lbl) lv_obj_add_flag(pin_lbl, LV_OBJ_FLAG_HIDDEN);
+        last_conn = false;
+        return;
+    }
     bool conn = notify_ble_connected();
+    /* Show the pairing PIN only while no phone is connected. */
+    if (pin_lbl) {
+        if (conn) lv_obj_add_flag(pin_lbl, LV_OBJ_FLAG_HIDDEN);
+        else      lv_obj_clear_flag(pin_lbl, LV_OBJ_FLAG_HIDDEN);
+    }
     lv_obj_set_style_bg_color(status_dot, conn ? COL_GOOD : COL_INK2, 0);
-    if (conn) lv_label_set_text(status_lbl, "Connected");
+    if (conn) lv_label_set_text_fmt(status_lbl, "Connected  rx:%lu",
+                  (unsigned long)notify_ble_rx_bytes());
     else      lv_label_set_text_fmt(status_lbl, "Advertising  c:%lu d:%lu r:0x%02X",
                   (unsigned long)notify_ble_connects(),
                   (unsigned long)notify_ble_disconnects(),
@@ -115,6 +143,34 @@ void notify_screen_create()
     lv_label_set_text(hdr, "Notifications");
     lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 16);
 
+    /* Clear-all button, top-right */
+    lv_obj_t *clr = lv_button_create(notify_screen);
+    lv_obj_set_size(clr, 66, 34);
+    lv_obj_align(clr, LV_ALIGN_TOP_RIGHT, -12, 10);
+    lv_obj_set_style_bg_color(clr, COL_CARD, 0);
+    lv_obj_set_style_radius(clr, 10, 0);
+    lv_obj_set_style_shadow_width(clr, 0, 0);
+    lv_obj_add_event_cb(clr, on_clear, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *clrl = lv_label_create(clr);
+    lv_obj_set_style_text_font(clrl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(clrl, COL_ACCENT, 0);
+    lv_label_set_text(clrl, "Clear");
+    lv_obj_center(clrl);
+
+    /* Settings gear, top-left */
+    lv_obj_t *gear = lv_button_create(notify_screen);
+    lv_obj_set_size(gear, 40, 34);
+    lv_obj_align(gear, LV_ALIGN_TOP_LEFT, 12, 10);
+    lv_obj_set_style_bg_color(gear, COL_CARD, 0);
+    lv_obj_set_style_radius(gear, 10, 0);
+    lv_obj_set_style_shadow_width(gear, 0, 0);
+    lv_obj_add_event_cb(gear, on_settings, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *gicon = lv_label_create(gear);
+    lv_obj_set_style_text_font(gicon, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(gicon, COL_INK, 0);
+    lv_label_set_text(gicon, LV_SYMBOL_SETTINGS);
+    lv_obj_center(gicon);
+
     status_dot = lv_obj_create(notify_screen);
     lv_obj_remove_style_all(status_dot);
     lv_obj_set_size(status_dot, 10, 10);
@@ -126,11 +182,19 @@ void notify_screen_create()
     lv_obj_set_style_text_color(status_lbl, COL_INK2, 0);
     lv_obj_align(status_lbl, LV_ALIGN_TOP_LEFT, 42, 49);
 
+    /* Pairing PIN — shown while unpaired so the user knows what to type on the
+     * phone; hidden once a phone is connected. */
+    pin_lbl = lv_label_create(notify_screen);
+    lv_obj_set_style_text_font(pin_lbl, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(pin_lbl, COL_ACCENT, 0);
+    lv_obj_align(pin_lbl, LV_ALIGN_TOP_MID, 0, 74);
+    lv_label_set_text_fmt(pin_lbl, "Pairing PIN  %lu", (unsigned long)NOTIFY_PIN);
+
     /* scrollable list */
     list = lv_obj_create(notify_screen);
     lv_obj_remove_style_all(list);
-    lv_obj_set_size(list, lv_pct(92), 400);
-    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, 78);
+    lv_obj_set_size(list, lv_pct(92), 382);
+    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, 100);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(list, 10, 0);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
@@ -158,4 +222,87 @@ void notify_screen_show()
 bool notify_screen_is_active()
 {
     return notify_screen && lv_scr_act() == notify_screen;
+}
+
+/* ---- popup banner over any screen ---- */
+
+static lv_obj_t *banner = nullptr;
+
+static void banner_dismiss(lv_timer_t *t)
+{
+    if (banner) { lv_obj_del(banner); banner = nullptr; }
+    lv_timer_del(t);
+}
+
+static void banner_clicked(lv_event_t *e)
+{
+    if (banner) { lv_obj_del(banner); banner = nullptr; }
+    notify_screen_show();
+}
+
+static void show_banner(const notif_t *n)
+{
+    if (banner) { lv_obj_del(banner); banner = nullptr; }
+
+    /* Attach to the ACTIVE screen (not lv_layer_top): this firmware repaints the
+     * clock with partial invalidations every second, and the top layer isn't
+     * re-composited over those, so a top-layer banner gets visually erased on the
+     * next tick. As a sibling of the clock widgets it composites reliably. */
+    banner = lv_obj_create(lv_scr_act());
+    lv_obj_remove_style_all(banner);
+    lv_obj_set_width(banner, lv_pct(94));
+    lv_obj_set_height(banner, LV_SIZE_CONTENT);
+    lv_obj_align(banner, LV_ALIGN_TOP_MID, 0, 8);
+    lv_obj_set_style_bg_color(banner, COL_CARD, 0);
+    lv_obj_set_style_bg_opa(banner, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(banner, 16, 0);
+    lv_obj_set_style_pad_all(banner, 12, 0);
+    lv_obj_set_style_pad_row(banner, 2, 0);
+    lv_obj_set_style_border_width(banner, 2, 0);
+    lv_obj_set_style_border_color(banner, COL_ACCENT, 0);
+    lv_obj_set_flex_flow(banner, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(banner, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(banner, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(banner, banner_clicked, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *src = lv_label_create(banner);
+    lv_obj_set_style_text_font(src, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(src, COL_ACCENT, 0);
+    lv_label_set_text(src, n->src[0] ? n->src : "Notification");
+
+    if (n->title[0]) {
+        lv_obj_t *t = lv_label_create(banner);
+        lv_obj_set_style_text_font(t, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_color(t, COL_INK, 0);
+        lv_obj_set_width(t, lv_pct(100));
+        lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
+        lv_label_set_text(t, n->title);
+    }
+    if (n->body[0]) {
+        lv_obj_t *b = lv_label_create(banner);
+        lv_obj_set_style_text_font(b, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(b, COL_INK2, 0);
+        lv_obj_set_width(b, lv_pct(100));
+        lv_label_set_long_mode(b, LV_LABEL_LONG_DOT);
+        lv_label_set_text(b, n->body);
+    }
+
+    lv_obj_move_foreground(banner);                 /* above the clock widgets */
+    lv_timer_create(banner_dismiss, 6000, NULL);    /* auto-dismiss after 6 s */
+}
+
+void notify_ui_poll(void)
+{
+    static uint32_t last_total = 0;
+    uint32_t t = notify_ble_total_added();
+    if (t == last_total) { return; }
+    last_total = t;
+    /* Don't stack a banner on top of the list screen — it's already visible there. */
+    if (notify_screen_is_active()) return;
+    /* One banner at a time: an incoming call fires several BLE events in quick
+     * succession (ring + the dialer's notification); let the first ride out its
+     * timer instead of flickering as each event recreates it. */
+    if (banner) return;
+    const notif_t *n = notify_get(0);   /* newest */
+    if (n) show_banner(n);
 }
