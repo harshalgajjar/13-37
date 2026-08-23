@@ -159,10 +159,13 @@ bool notify_ble_call_ringing(void) { return s_call_ringing; }
  * user can still answer it there. */
 void notify_ble_call_silence(void) { call_ring_stop(); }
 
-/* Reject: decline the call on the phone, then stop the local ring. */
+/* Reject: decline the call on the phone, then stop the local ring. Use "END"
+ * (23 bytes with newline) rather than "REJECT" (26) so the message fits in a
+ * single notification even at the minimum negotiated MTU; Gadgetbridge maps END
+ * to hanging up, which declines a still-ringing call. */
 void notify_ble_call_reject(void)
 {
-    notify_ble_send_line("{\"t\":\"call\",\"n\":\"REJECT\"}");
+    notify_ble_send_line("{\"t\":\"call\",\"n\":\"END\"}");
     call_ring_stop();
 }
 
@@ -485,6 +488,9 @@ void notify_ble_stop(void)
 bool notify_ble_active(void)    { return s_active; }
 bool notify_ble_connected(void) { return s_connected; }
 
+/* Negotiated ATT MTU with the connected phone (0 if not connected). Diagnostic:
+ * outgoing control messages need MTU >= message length + 3 to fit one packet. */
+
 /* Keep-alive: called from the main loop. On this build WiFi and BLE can't share
  * the radio, so starting a WiFi tool (or a BLE scanner, or the mouse) tears the
  * BT controller down under us and the phone silently disconnects. This resumes
@@ -521,22 +527,16 @@ void notify_ble_keepalive(void)
 void notify_ble_send_line(const char *json)
 {
     if (!s_tx || !s_connected) return;
-    String s(json); s += "\n";
-    const uint8_t *p = (const uint8_t *)s.c_str();
-    size_t len = s.length();
-
-    /* One GATT notification carries (negotiated ATT_MTU - 3) bytes. With the
-     * raised MTU cap this is typically hundreds of bytes, so short control
-     * messages go out in a single packet; larger ones still fragment safely
-     * (Gadgetbridge reassembles until the trailing newline). */
-    uint16_t mtu = s_server ? s_server->getPeerMTU(s_server->getConnId()) : 23;
-    size_t chunk = (mtu > 23) ? (size_t)(mtu - 3) : 20;
-    for (size_t off = 0; off < len; off += chunk) {
-        size_t n = (len - off < chunk) ? (len - off) : chunk;
-        s_tx->setValue((uint8_t *)(p + off), n);
-        s_tx->notify();
-        if (off + chunk < len) delay(12);   /* let the stack flush each packet */
-    }
+    /* Terminate with CR-LF, not a bare LF. Gadgetbridge's line splitter takes
+     * substring(0, indexOf('\n') - 1) — it always drops the character right
+     * before the '\n', assuming a '\r' is there (Bangle.js sends via
+     * Bluetooth.println(), which emits \r\n). With a bare '\n' it strips our
+     * closing '}' instead, making every object "unterminated" (the char-24 error
+     * on {"t":"call","n":"REJECT"}). The '\r' gives it a throwaway char to eat. */
+    String s(json); s += "\r\n";
+    /* Whole message in one notification — the negotiated MTU is high. */
+    s_tx->setValue((uint8_t *)s.c_str(), s.length());
+    s_tx->notify();
 }
 
 void notify_ble_loop(void)

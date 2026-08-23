@@ -113,8 +113,7 @@ static void update_status(void)
         else      lv_obj_clear_flag(pin_lbl, LV_OBJ_FLAG_HIDDEN);
     }
     lv_obj_set_style_bg_color(status_dot, conn ? COL_GOOD : COL_INK2, 0);
-    if (conn) lv_label_set_text_fmt(status_lbl, "Connected  rx:%lu",
-                  (unsigned long)notify_ble_rx_bytes());
+    if (conn) lv_label_set_text(status_lbl, "Connected");
     else      lv_label_set_text_fmt(status_lbl, "Advertising  c:%lu d:%lu r:0x%02X",
                   (unsigned long)notify_ble_connects(),
                   (unsigned long)notify_ble_disconnects(),
