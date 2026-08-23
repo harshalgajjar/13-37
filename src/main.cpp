@@ -92,6 +92,16 @@ static bool     clock_vibrate    = false;
 // Battery widget objects
 static lv_obj_t *bat_fill;
 static lv_obj_t *bat_label;
+static lv_obj_t *bat_time_label;   // estimated runtime, above the battery icon
+
+// Runtime estimate from the observed drain rate (the AXP2101 exposes no battery
+// current, so we time how long each 1% takes and smooth it). s_sec_per_pct is
+// the EMA of seconds per 1% discharge; 0 until the first 1% has been observed.
+static int      s_batt_ref_pct = -1;
+static uint32_t s_batt_ref_ms  = 0;
+// Seed with a ~14 h full-charge prior (504 s per 1%) so an estimate shows
+// immediately; the EMA converges it to the real drain within a few percent.
+static float    s_sec_per_pct  = 504.0f;
 
 // Bell glyph shown to the left of the battery when the alarm is enabled.
 static lv_obj_t *alarm_indicator;
@@ -190,6 +200,14 @@ static void build_battery_widget(lv_obj_t *screen)
     lv_obj_set_style_text_font(bat_label, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_label_set_text(bat_label, "--");
     lv_obj_align(bat_label, LV_ALIGN_CENTER, 0, 0);
+
+    // Estimated runtime, centred just above the battery icon. Hidden until the
+    // drain rate is known (and while charging).
+    bat_time_label = lv_label_create(screen);
+    lv_obj_set_style_text_color(bat_time_label, lv_color_make(0x99, 0x99, 0x99), LV_PART_MAIN);
+    lv_obj_set_style_text_font(bat_time_label, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_label_set_text(bat_time_label, "");
+    lv_obj_align(bat_time_label, LV_ALIGN_BOTTOM_MID, 0, -10 - BAT_H - 4);
 
     // Terminal nub (positive terminal on the right)
     bat_nub = lv_obj_create(container);
@@ -466,11 +484,46 @@ static void update_battery()
     lv_obj_set_style_bg_color(bat_nub, color, LV_PART_MAIN);
 
     char buf[16];
-    if (instance.pmu.isCharging())
+    bool charging = instance.pmu.isCharging();
+    if (charging)
         snprintf(buf, sizeof(buf), "%d%% " LV_SYMBOL_CHARGE, pct);
     else
         snprintf(buf, sizeof(buf), "%d%%", pct);
     lv_label_set_text(bat_label, buf);
+
+    // --- runtime estimate from the observed drain rate ---
+    uint32_t now = millis();
+    if (charging || s_batt_ref_pct < 0) {
+        // Charging or first sample: (re)seat the reference. Keep the learned rate
+        // so it carries across a charge cycle (drain profile is similar).
+        s_batt_ref_pct = pct;
+        s_batt_ref_ms  = now;
+    } else if (pct > s_batt_ref_pct) {
+        // Went up while "not charging" (gauge jitter / relaxation) — reseat.
+        s_batt_ref_pct = pct;
+        s_batt_ref_ms  = now;
+    } else if (pct < s_batt_ref_pct) {
+        // Discharged one or more percent since the reference; derive seconds/1%.
+        int   drop = s_batt_ref_pct - pct;
+        float sec  = (float)(now - s_batt_ref_ms) / 1000.0f / (float)drop;
+        s_sec_per_pct = (s_sec_per_pct <= 0.0f) ? sec
+                                                : s_sec_per_pct * 0.7f + sec * 0.3f;
+        s_batt_ref_pct = pct;
+        s_batt_ref_ms  = now;
+    }
+
+    if (charging) {
+        lv_label_set_text(bat_time_label, "");   // no runtime estimate while charging
+    } else {
+        long total_min = (long)(s_sec_per_pct * pct / 60.0f);
+        if (total_min < 0) total_min = 0;
+        int h = (int)(total_min / 60);
+        int m = (int)(total_min % 60);
+        char tbuf[24];
+        if (h > 0) snprintf(tbuf, sizeof(tbuf), "~%dh %02dm left", h, m);
+        else       snprintf(tbuf, sizeof(tbuf), "~%dm left", m);
+        lv_label_set_text(bat_time_label, tbuf);
+    }
 }
 
 // Pack the alarm / stopwatch / timer indicators flush against the left
