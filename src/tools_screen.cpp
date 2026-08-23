@@ -14,11 +14,201 @@
 #include "aprs_screen.h"
 #include "wifi_screen.h"
 #include "analyze_screen.h"
+#include "bt_analyze_screen.h"
+#include "notify_ble.h"   // notify_ble_active / notify_ble_stop — radio arbitration
+#include "mouse_hid.h"    // mouse_hid_is_running / mouse_hid_stop
 #include <LilyGoLib.h>
 
 // Defined in main.cpp
 void clock_screen_show();
 void main_loop_request_lvgl_priority(int cycles);
+
+// ---- Radio-conflict guard -----------------------------------------------
+// The notification link and the BLE mouse own the radio via BLEDevice; the
+// scanner/analyzer tools own it via ble_scan_manager (BLE) or the WiFi driver.
+// This build can't run WiFi or a BLE scanner alongside the BLE link — starting
+// one while the link is up freezes the watch. So if a link owner is active,
+// confirm with the user first, then release it before running the tool (the
+// notify keep-alive rebuilds the link automatically once the tool stops).
+typedef void (*radio_action_fn)(void);
+static radio_action_fn s_pending_action = nullptr;
+static lv_obj_t       *s_conflict_modal = nullptr;
+
+static bool ble_link_owner_active()
+{
+    return notify_ble_active() || mouse_hid_is_running();
+}
+
+static void run_pending_action()
+{
+    notify_ble_stop();                              // release the radio
+    if (mouse_hid_is_running()) mouse_hid_stop();
+    radio_action_fn a = s_pending_action;
+    s_pending_action = nullptr;
+    if (a) a();
+}
+
+static void conflict_close()
+{
+    if (s_conflict_modal) { lv_obj_del(s_conflict_modal); s_conflict_modal = nullptr; }
+}
+static void conflict_continue_cb(lv_event_t *) { conflict_close(); run_pending_action(); }
+static void conflict_cancel_cb(lv_event_t *)   { conflict_close(); s_pending_action = nullptr; }
+
+static void show_conflict_modal()
+{
+    s_conflict_modal = lv_obj_create(lv_scr_act());
+    lv_obj_remove_style_all(s_conflict_modal);
+    lv_obj_set_size(s_conflict_modal, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_color(s_conflict_modal, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_conflict_modal, LV_OPA_70, 0);
+    lv_obj_clear_flag(s_conflict_modal, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *card = lv_obj_create(s_conflict_modal);
+    lv_obj_set_width(card, lv_pct(82));
+    lv_obj_set_height(card, LV_SIZE_CONTENT);
+    lv_obj_center(card);
+    lv_obj_set_style_bg_color(card, lv_color_hex(0x141416), 0);
+    lv_obj_set_style_radius(card, 16, 0);
+    lv_obj_set_style_pad_all(card, 18, 0);
+    lv_obj_set_style_pad_row(card, 16, 0);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *txt = lv_label_create(card);
+    lv_obj_set_width(txt, lv_pct(100));
+    lv_label_set_long_mode(txt, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(txt, lv_color_hex(0xECECF0), 0);
+    lv_obj_set_style_text_font(txt, &lv_font_montserrat_16, 0);
+    lv_label_set_text(txt, "This scanner needs Bluetooth and will disconnect phone "
+                           "notifications until you stop it. Continue?");
+
+    lv_obj_t *row = lv_obj_create(card);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_width(row, lv_pct(100));
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 10, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *cancel = lv_button_create(row);
+    lv_obj_set_flex_grow(cancel, 1);
+    lv_obj_set_height(cancel, 48);
+    lv_obj_set_style_bg_color(cancel, lv_color_hex(0x333338), 0);
+    lv_obj_set_style_shadow_width(cancel, 0, 0);
+    lv_obj_add_event_cb(cancel, conflict_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cl = lv_label_create(cancel);
+    lv_obj_set_style_text_color(cl, lv_color_hex(0xECECF0), 0);
+    lv_label_set_text(cl, "Cancel");
+    lv_obj_center(cl);
+
+    lv_obj_t *cont = lv_button_create(row);
+    lv_obj_set_flex_grow(cont, 1);
+    lv_obj_set_height(cont, 48);
+    lv_obj_set_style_bg_color(cont, lv_color_hex(0xFF7B2E), 0);
+    lv_obj_set_style_shadow_width(cont, 0, 0);
+    lv_obj_add_event_cb(cont, conflict_continue_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *ct = lv_label_create(cont);
+    lv_obj_set_style_text_color(ct, lv_color_white(), 0);
+    lv_label_set_text(ct, "Continue");
+    lv_obj_center(ct);
+}
+
+// Run a radio tool, first confirming + releasing the BLE link if it's in use.
+static void guard_radio(radio_action_fn action)
+{
+    if (ble_link_owner_active()) {
+        s_pending_action = action;
+        show_conflict_modal();
+    } else {
+        action();
+    }
+}
+
+// ---- Analyze band chooser -----------------------------------------------
+// "Analyze" is really three analyzers chained by swipes (WiFi -> Bluetooth ->
+// LoRa), which is confusing on entry. Ask which band up front. WiFi and BT both
+// need the radio, so picking either also releases the notification link.
+static void analyze_release_and(radio_action_fn open)
+{
+    conflict_close();
+    notify_ble_stop();
+    if (mouse_hid_is_running()) mouse_hid_stop();
+    open();
+}
+static void analyze_pick_wifi(lv_event_t *) { analyze_release_and(analyze_screen_show); }
+static void analyze_pick_bt(lv_event_t *)   { analyze_release_and(bt_analyze_screen_show); }
+
+static void show_analyze_chooser()
+{
+    s_conflict_modal = lv_obj_create(lv_scr_act());
+    lv_obj_remove_style_all(s_conflict_modal);
+    lv_obj_set_size(s_conflict_modal, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_color(s_conflict_modal, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_conflict_modal, LV_OPA_70, 0);
+    lv_obj_clear_flag(s_conflict_modal, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *card = lv_obj_create(s_conflict_modal);
+    lv_obj_set_width(card, lv_pct(82));
+    lv_obj_set_height(card, LV_SIZE_CONTENT);
+    lv_obj_center(card);
+    lv_obj_set_style_bg_color(card, lv_color_hex(0x141416), 0);
+    lv_obj_set_style_radius(card, 16, 0);
+    lv_obj_set_style_pad_all(card, 18, 0);
+    lv_obj_set_style_pad_row(card, 12, 0);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *txt = lv_label_create(card);
+    lv_obj_set_width(txt, lv_pct(100));
+    lv_label_set_long_mode(txt, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(txt, lv_color_hex(0xECECF0), 0);
+    lv_obj_set_style_text_font(txt, &lv_font_montserrat_16, 0);
+    lv_label_set_text(txt, "Analyze which band?\nScanning pauses notifications.");
+
+    lv_obj_t *row = lv_obj_create(card);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_width(row, lv_pct(100));
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 10, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *wifi = lv_button_create(row);
+    lv_obj_set_flex_grow(wifi, 1);
+    lv_obj_set_height(wifi, 48);
+    lv_obj_set_style_bg_color(wifi, lv_color_hex(0x2E6BFF), 0);
+    lv_obj_set_style_shadow_width(wifi, 0, 0);
+    lv_obj_add_event_cb(wifi, analyze_pick_wifi, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *wl = lv_label_create(wifi);
+    lv_obj_set_style_text_color(wl, lv_color_white(), 0);
+    lv_label_set_text(wl, "WiFi");
+    lv_obj_center(wl);
+
+    lv_obj_t *bt = lv_button_create(row);
+    lv_obj_set_flex_grow(bt, 1);
+    lv_obj_set_height(bt, 48);
+    lv_obj_set_style_bg_color(bt, lv_color_hex(0x00A0C0), 0);
+    lv_obj_set_style_shadow_width(bt, 0, 0);
+    lv_obj_add_event_cb(bt, analyze_pick_bt, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *bl = lv_label_create(bt);
+    lv_obj_set_style_text_color(bl, lv_color_white(), 0);
+    lv_label_set_text(bl, "Bluetooth");
+    lv_obj_center(bl);
+
+    lv_obj_t *cancel = lv_button_create(card);
+    lv_obj_set_width(cancel, lv_pct(100));
+    lv_obj_set_height(cancel, 44);
+    lv_obj_set_style_bg_color(cancel, lv_color_hex(0x333338), 0);
+    lv_obj_set_style_shadow_width(cancel, 0, 0);
+    lv_obj_add_event_cb(cancel, conflict_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cl = lv_label_create(cancel);
+    lv_obj_set_style_text_color(cl, lv_color_hex(0xECECF0), 0);
+    lv_label_set_text(cl, "Cancel");
+    lv_obj_center(cl);
+}
 
 static lv_obj_t *tools_screen;
 static lv_obj_t *t_airtag;    // referenced by on_airtag_clicked for colour swap
@@ -49,8 +239,7 @@ static void on_airtag_clicked(lv_event_t *e)
         airtag_stop();
         set_airtag_tile_running(false);
     } else {
-        bool ok = airtag_start();
-        set_airtag_tile_running(ok);   // stays gray if BT init failed
+        guard_radio([]{ set_airtag_tile_running(airtag_start()); });
     }
 }
 
@@ -68,8 +257,7 @@ static void on_flipper_clicked(lv_event_t *e)
         flipper_stop();
         set_flipper_tile_running(false);
     } else {
-        bool ok = flipper_start();
-        set_flipper_tile_running(ok);   // stays gray if BT init failed
+        guard_radio([]{ set_flipper_tile_running(flipper_start()); });
     }
 }
 
@@ -87,8 +275,7 @@ static void on_skimmer_clicked(lv_event_t *e)
         skimmer_stop();
         set_skimmer_tile_running(false);
     } else {
-        bool ok = skimmer_start();
-        set_skimmer_tile_running(ok);   // stays gray if BT init failed
+        guard_radio([]{ set_skimmer_tile_running(skimmer_start()); });
     }
 }
 
@@ -106,8 +293,7 @@ static void on_eviltwin_clicked(lv_event_t *e)
         evil_twin_stop();
         set_eviltwin_tile_running(false);
     } else {
-        bool ok = evil_twin_start();
-        set_eviltwin_tile_running(ok);
+        guard_radio([]{ set_eviltwin_tile_running(evil_twin_start()); });  // WiFi
     }
 }
 
@@ -125,8 +311,7 @@ static void on_flock_clicked(lv_event_t *e)
         flock_stop();
         set_flock_tile_running(false);
     } else {
-        bool ok = flock_start();
-        set_flock_tile_running(ok);
+        guard_radio([]{ set_flock_tile_running(flock_start()); });
     }
 }
 
@@ -403,10 +588,10 @@ void tools_screen_create()
     lv_obj_add_event_cb(t_aprs, [](lv_event_t *) { aprs_screen_show(); }, LV_EVENT_CLICKED, NULL);
 
     // WiFi tile opens the site-survey + ping-sweep screen.
-    lv_obj_add_event_cb(t_wifi, [](lv_event_t *) { wifi_screen_show(); }, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(t_wifi, [](lv_event_t *) { guard_radio(wifi_screen_show); }, LV_EVENT_CLICKED, NULL);
 
     // Analyze tile opens the WiFi channel utilisation visualisation.
-    lv_obj_add_event_cb(t_analyze, [](lv_event_t *) { analyze_screen_show(); }, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(t_analyze, [](lv_event_t *) { show_analyze_chooser(); }, LV_EVENT_CLICKED, NULL);
 
     // lv_obj_create() creates objects with LV_OBJ_FLAG_CLICKABLE set by
     // default, so the icon shapes inside each tile would otherwise swallow
