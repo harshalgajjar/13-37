@@ -31,3 +31,9 @@ bool ble_scan_active();
 // How many consumers are currently registered. Useful for status UIs
 // that want to surface "N scanners running" instead of just on/off.
 int  ble_scan_consumer_count();
+
+// When set true, the last consumer leaving only stops scanning instead of
+// tearing the BT controller down — so a BLEDevice owner (the notification link)
+// can keep its stack alive across scanner sessions. The notification link sets
+// this once its stack is built.
+void ble_scan_keep_controller(bool keep);

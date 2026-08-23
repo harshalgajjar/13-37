@@ -27,8 +27,9 @@ typedef struct {
 /* Lifecycle */
 bool notify_ble_begin(void);      /* start advertising; false if a scanner holds BLE */
 void notify_ble_stop(void);       /* tear down, release the BLE radio */
-bool notify_ble_active(void);     /* is the link enabled? */
+bool notify_ble_active(void);     /* is the link advertising/connected right now? */
 bool notify_ble_connected(void);  /* is a phone connected? */
+bool notify_ble_is_built(void);   /* has the BLE stack been constructed this boot? */
 bool notify_ble_paired(void);     /* did the last pairing complete (PIN accepted)? */
 
 /* Incoming-call controls (driven by the call banner). */

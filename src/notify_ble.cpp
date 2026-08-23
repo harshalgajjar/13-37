@@ -407,95 +407,104 @@ uint8_t  notify_ble_last_reason(void) { return s_last_reason; }
  * radio contention (WiFi/scanners/mouse) and rebuild automatically when free. */
 static bool s_want_on = false;
 
+/* Has the BLEDevice stack + GATT server been constructed this session? The
+ * Arduino BLE library can't cleanly re-init after a full teardown, so we build
+ * it ONCE and thereafter only pause/resume advertising. */
+static bool s_built = false;
+
 bool notify_ble_begin(void)
 {
     s_want_on = true;   /* remember the intent even if we can't start right now */
     if (s_active) return true;
     settings_load();   /* pull vibrate/sound/DND prefs off SD before RX starts */
 
-    /* BLE radio arbitration. The scanners own the controller via
-     * ble_scan_manager; the mouse owns it via BLEDevice. Only one holder at a
-     * time, so refuse if a scanner is active, and take over from the mouse. */
-    if (ble_scan_active()) return false;
-    if (mouse_hid_is_running()) mouse_hid_stop();
+    if (!s_built) {
+        /* First time: build the whole stack. Can't build on top of a scanner
+         * (it owns the GAP callback); take the mouse's radio if it has it. */
+        if (ble_scan_active()) return false;
+        if (mouse_hid_is_running()) mouse_hid_stop();
 
-    /* Name MUST start with "Bangle.js" — Gadgetbridge selects its notification
-     * protocol by name prefix, so anything else is filed as "unsupported". The
-     * user aliases it to "T-Watch Ultra" inside the app after pairing. */
-    BLEDevice::init("Bangle.js T-Watch Ultra");
+        /* Name MUST start with "Bangle.js" — Gadgetbridge selects its protocol by
+         * name prefix, else it's "unsupported". User aliases it in the app. */
+        BLEDevice::init("Bangle.js T-Watch Ultra");
 
-    /* Raise our local MTU cap. The ESP32 default is 23 (20-byte notifications),
-     * which truncated outgoing JSON like {"t":"call","n":"REJECT"} to 24 bytes,
-     * losing the closing brace. With a high cap, Gadgetbridge (which requests a
-     * large MTU) negotiates up and each message fits in a single notification. */
-    BLEDevice::setMTU(512);
+        /* Raise the local MTU cap (default 23 truncated outgoing JSON to 24 bytes,
+         * dropping the closing brace). Gadgetbridge negotiates up to fit a line. */
+        BLEDevice::setMTU(512);
 
-    s_server = BLEDevice::createServer();
-    if (!s_server) { BLEDevice::deinit(false); return false; }
-    s_server->setCallbacks(new SrvCb());
+        s_server = BLEDevice::createServer();
+        if (!s_server) { BLEDevice::deinit(false); return false; }
+        s_server->setCallbacks(new SrvCb());
 
-    BLEService *svc = s_server->createService(NUS_SVC);
-    s_tx = svc->createCharacteristic(NUS_TX, BLECharacteristic::PROPERTY_NOTIFY);
-    s_tx->addDescriptor(new BLE2902());
-    BLECharacteristic *rx = svc->createCharacteristic(
-        NUS_RX, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
-    rx->setCallbacks(new RxCb());
+        BLEService *svc = s_server->createService(NUS_SVC);
+        s_tx = svc->createCharacteristic(NUS_TX, BLECharacteristic::PROPERTY_NOTIFY);
+        s_tx->addDescriptor(new BLE2902());
+        BLECharacteristic *rx = svc->createCharacteristic(
+            NUS_RX, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+        rx->setCallbacks(new RxCb());
 
-    /* Secure pairing with a displayed PIN. The watch shows NOTIFY_PIN and the
-     * phone must enter it (MITM protection), so a stranger can't silently bond
-     * and read your notifications. IO_CAP_OUT = "this device has a display".
-     * The passkey is fixed via ESP_BLE_SM_SET_STATIC_PASSKEY so it always matches
-     * what the Notify screen prints. Both encryption keys must still be
-     * distributed or bonding drops on the first report (learned from mouse HID). */
-    s_paired = false; s_pair_fail = false;
-    BLEDevice::setSecurityCallbacks(new SecCb());
-    uint32_t passkey = NOTIFY_PIN;
-    esp_ble_gap_set_security_param(ESP_BLE_SM_SET_STATIC_PASSKEY, &passkey, sizeof(passkey));
+        /* Secure pairing with a displayed PIN (MITM, watch displays NOTIFY_PIN via
+         * a fixed static passkey). Both encryption keys distributed or bonding
+         * drops on the first report (learned from mouse HID). */
+        s_paired = false; s_pair_fail = false;
+        BLEDevice::setSecurityCallbacks(new SecCb());
+        uint32_t passkey = NOTIFY_PIN;
+        esp_ble_gap_set_security_param(ESP_BLE_SM_SET_STATIC_PASSKEY, &passkey, sizeof(passkey));
 
-    BLESecurity security;
-    security.setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);  /* MITM => PIN */
-    security.setCapability(ESP_IO_CAP_OUT);                        /* watch displays PIN */
-    security.setKeySize(16);
-    security.setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
-    security.setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+        BLESecurity security;
+        security.setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);  /* MITM => PIN */
+        security.setCapability(ESP_IO_CAP_OUT);                        /* watch displays PIN */
+        security.setKeySize(16);
+        security.setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+        security.setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
 
-    svc->start();
+        svc->start();
 
-    /* Advertising mirrors the mouse exactly (proven discoverable + connectable):
-     * appearance + a small 16-bit service UUID + scan response carrying the name.
-     * We do NOT advertise the 128-bit NUS UUID (it broke discovery) — Gadgetbridge
-     * matches by name and discovers the NUS service over GATT after connecting. */
-    BLEAdvertising *adv = BLEDevice::getAdvertising();
-    adv->setAppearance(0x00C0);                       /* Generic Watch icon */
-    adv->addServiceUUID(BLEUUID((uint16_t)0x1811));   /* Alert Notification Service */
-    adv->setScanResponse(true);
-    adv->start();
+        /* Advertising: appearance + a small 16-bit UUID + scan response with the
+         * name (the 128-bit NUS UUID overflowed the advert and broke discovery).
+         * Set up once; start/stop toggles it on resume/pause. */
+        BLEAdvertising *adv = BLEDevice::getAdvertising();
+        adv->setAppearance(0x00C0);                       /* Generic Watch icon */
+        adv->addServiceUUID(BLEUUID((uint16_t)0x1811));   /* Alert Notification Service */
+        adv->setScanResponse(true);
 
+        /* Keep the controller alive across scanner sessions — the Arduino BLE lib
+         * can't re-init after a teardown, so scanners must not deinit it. */
+        ble_scan_keep_controller(true);
+        s_built = true;
+    }
+
+    BLEDevice::startAdvertising();
     s_active = true;
     return true;
 }
 
+/* "Stop" is a PAUSE: drop the connection + advertising but keep the BLEDevice
+ * stack built, so we can resume without a re-init the library can't survive. */
 void notify_ble_stop(void)
 {
     if (!s_active) return;
     call_ring_stop();
-    BLEDevice::deinit(false);
-    s_server = nullptr; s_tx = nullptr;
+    if (s_built) {
+        BLEDevice::stopAdvertising();
+        if (s_connected && s_server) s_server->disconnect(s_server->getConnId());
+    }
     s_active = false; s_connected = false;
     portENTER_CRITICAL(&s_mux); s_rx_len = 0; portEXIT_CRITICAL(&s_mux);
 }
 
 bool notify_ble_active(void)    { return s_active; }
 bool notify_ble_connected(void) { return s_connected; }
+bool notify_ble_is_built(void)  { return s_built; }
 
 /* Negotiated ATT MTU with the connected phone (0 if not connected). Diagnostic:
  * outgoing control messages need MTU >= message length + 3 to fit one packet. */
 
-/* Keep-alive: called from the main loop. On this build WiFi and BLE can't share
- * the radio, so starting a WiFi tool (or a BLE scanner, or the mouse) tears the
- * BT controller down under us and the phone silently disconnects. This resumes
- * the notification link automatically once the radio is free again, so the user
- * doesn't have to reopen the Notify screen to get notifications back. */
+/* Keep-alive: called from the main loop. A radio tool (WiFi/BLE scanner/mouse)
+ * pauses the link; this resumes it automatically once the tool finishes, so the
+ * user doesn't have to reopen the Notify screen to get notifications back. The
+ * BLEDevice stack is kept built the whole time (ble_scan_keep_controller), so
+ * resuming is just re-advertising — no fragile re-init. */
 void notify_ble_keepalive(void)
 {
     if (!s_want_on) return;
@@ -505,23 +514,12 @@ void notify_ble_keepalive(void)
     if (now - last_ms < 2000) return;   /* cheap: check a few times a minute */
     last_ms = now;
 
-    /* If the controller was torn down out from under us, our flags are stale —
-     * clear them so we can rebuild cleanly. */
-    bool controller_down = (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE);
-    if (s_active && controller_down) {
-        s_active = false; s_connected = false; s_server = nullptr; s_tx = nullptr;
-    }
-
     /* Stand down while another radio owner is active — don't fight WiFi or a
      * scanner for the antenna; just wait for them to finish. */
     if (ble_scan_active() || mouse_hid_is_running() || WiFi.getMode() != WIFI_MODE_NULL)
         return;
 
-    if (!s_active) {
-        notify_ble_begin();               /* radio is free — bring the link back */
-    } else if (!s_connected) {
-        BLEDevice::startAdvertising();     /* up but unpaired — keep discoverable */
-    }
+    if (!s_active) notify_ble_begin();    /* radio is free — resume advertising */
 }
 
 void notify_ble_send_line(const char *json)
