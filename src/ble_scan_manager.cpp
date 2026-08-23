@@ -7,6 +7,14 @@
 static ble_scan_cb_t s_consumers[BLE_SCAN_MAX_CONSUMERS] = {};
 static int           s_consumer_count = 0;
 
+// When set, the last consumer leaving stops scanning but does NOT tear the BT
+// controller down — the notification link owns BLEDevice on top of it and the
+// Arduino BLE library cannot re-init after a full teardown (its `initialized`
+// flag is sticky and deinit(true) does a fatal mem_release). So notify holds the
+// controller up across scanner sessions instead of rebuilding it.
+static bool          s_keep_controller = false;
+void ble_scan_keep_controller(bool keep) { s_keep_controller = keep; }
+
 static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 {
     // Re-arm the scan after the controller acknowledges our params. If every
@@ -97,8 +105,12 @@ void ble_scan_remove(ble_scan_cb_t cb)
             for (int j = i; j < s_consumer_count - 1; j++)
                 s_consumers[j] = s_consumers[j + 1];
             s_consumers[--s_consumer_count] = nullptr;
-            if (s_consumer_count == 0)
-                tear_down_controller();
+            if (s_consumer_count == 0) {
+                if (s_keep_controller)
+                    esp_ble_gap_stop_scanning();  // notify keeps the stack up
+                else
+                    tear_down_controller();
+            }
             return;
         }
     }

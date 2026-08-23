@@ -1,5 +1,6 @@
 #include "mouse_hid.h"
 #include "ble_scan_manager.h"
+#include "notify_ble.h"
 
 #include <Arduino.h>
 #include <BLEDevice.h>
@@ -78,6 +79,14 @@ bool mouse_hid_start()
     // between this HID peripheral and the scan manager. Refuse if a scanner
     // (AirTag / wardriver) currently holds it.
     if (ble_scan_active()) return false;
+
+    // The notification link owns BLEDevice for the whole session (the Arduino BLE
+    // library can't re-init after a teardown), so the mouse — which needs its own
+    // BLEDevice with a different name + HID service — can't run alongside it.
+    // Refuse rather than corrupt the shared stack. (Notifications are the primary
+    // BLE feature; the mouse is available only when notifications were never
+    // started this boot.)
+    if (notify_ble_is_built()) return false;
 
     BLEDevice::init("T-Watch Mouse");
 
