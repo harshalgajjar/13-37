@@ -26,7 +26,8 @@ typedef struct {
 
 /* Lifecycle */
 bool notify_ble_begin(void);      /* start advertising; false if a scanner holds BLE */
-void notify_ble_stop(void);       /* tear down, release the BLE radio */
+void notify_ble_stop(void);       /* pause: drop link, keep controller up (BLE scanners share it) */
+void notify_ble_suspend_radio(void); /* WiFi tools: disable bluedroid+controller to free the radio */
 bool notify_ble_active(void);     /* is the link advertising/connected right now? */
 bool notify_ble_connected(void);  /* is a phone connected? */
 bool notify_ble_is_built(void);   /* has the BLE stack been constructed this boot? */

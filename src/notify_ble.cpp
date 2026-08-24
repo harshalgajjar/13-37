@@ -11,8 +11,9 @@
 #include <BLE2902.h>
 #include <BLESecurity.h>
 #include <esp_gap_ble_api.h>   /* esp_ble_gap_set_security_param, static passkey */
-#include <esp_bt.h>            /* esp_bt_controller_get_status — teardown detect */
-#include <WiFi.h>              /* WiFi.getMode — this build can't run WiFi + BLE  */
+#include <esp_bt.h>            /* esp_bt_controller_enable/disable                 */
+#include <esp_bt_main.h>       /* esp_bluedroid_enable/disable (reversible)       */
+#include <WiFi.h>              /* WiFi.getMode — WiFi tools need the BLE radio off */
 #include <string.h>
 #include "ble_scan_manager.h"   /* ble_scan_active() — scanner arbitration */
 #include "mouse_hid.h"          /* take over the BLE radio from the mouse   */
@@ -439,6 +440,8 @@ static bool s_want_on = false;
  * it ONCE and thereafter only pause/resume advertising. */
 static bool s_built = false;
 
+static void radio_reacquire(void);   /* fwd: re-enable radio after a WiFi tool */
+
 bool notify_ble_begin(void)
 {
     s_want_on = true;   /* remember the intent even if we can't start right now */
@@ -513,13 +516,18 @@ bool notify_ble_begin(void)
         s_built = true;
     }
 
+    radio_reacquire();   /* re-enable bluedroid + controller if a WiFi tool freed them */
     BLEDevice::startAdvertising();
     s_active = true;
     return true;
 }
 
+/* Radio suspended (bluedroid + controller disabled) for a WiFi tool. */
+static bool s_radio_suspended = false;
+
 /* "Stop" is a PAUSE: drop the connection + advertising but keep the BLEDevice
- * stack built, so we can resume without a re-init the library can't survive. */
+ * stack built, so we can resume without a re-init the library can't survive.
+ * Used by BLE scanners, which then SHARE our still-enabled controller. */
 void notify_ble_stop(void)
 {
     if (!s_active) return;
@@ -530,6 +538,37 @@ void notify_ble_stop(void)
     }
     s_active = false; s_connected = false;
     portENTER_CRITICAL(&s_mux); s_rx_len = 0; portEXIT_CRITICAL(&s_mux);
+}
+
+/* Deeper release for WiFi tools: WiFi can't come up cleanly alongside the heavy
+ * bluedroid stack, so disable bluedroid + the BT controller to free the radio.
+ * These are the REVERSIBLE enable/disable calls (not init/deinit), so the stack
+ * stays built and reacquire brings it back — no fragile BLEDevice re-init. */
+void notify_ble_suspend_radio(void)
+{
+    call_ring_stop();
+    if (s_active && s_built) {
+        BLEDevice::stopAdvertising();
+        if (s_connected && s_server) s_server->disconnect(s_server->getConnId());
+    }
+    s_active = false; s_connected = false;
+    if (s_built && !s_radio_suspended) {
+        esp_bluedroid_disable();
+        esp_bt_controller_disable();
+        s_radio_suspended = true;
+    }
+}
+
+/* Called from notify_ble_begin before it re-advertises. If a WiFi tool suspended
+ * the radio, bring it back. Re-enabling bluedroid + the controller in-place after
+ * WiFi has proven to hang with this BLE library (its stack can't cleanly resume),
+ * so a clean reboot is the reliable path — it resets both radios and notifications
+ * come back fresh. This only fires after a WiFi tool, never on a normal start. */
+static void radio_reacquire(void)
+{
+    if (!s_radio_suspended) return;
+    delay(60);        // let the pending screen redraw so it's not a black flash
+    ESP.restart();
 }
 
 bool notify_ble_active(void)    { return s_active; }
