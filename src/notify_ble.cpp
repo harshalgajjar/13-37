@@ -385,14 +385,39 @@ uint32_t notify_ble_rx_bytes(void) { return s_rx_bytes; }
 static volatile uint32_t s_connects    = 0;
 static volatile uint32_t s_disconnects = 0;
 static volatile uint8_t  s_last_reason = 0;
+/* Latest connection interval reported by the controller, in units of 1.25 ms
+ * (0 = not connected). Power opt #2 verification: this should read a few-hundred
+ * ms, not tens, once the longer params are honoured. */
+static volatile uint16_t s_conn_interval = 0;
+
+/* BLEDevice invokes this for EVERY GAP event in addition to its own handling
+ * (setCustomGapHandler), so we can track the LIVE connection interval — it fires
+ * whenever the params change, e.g. after the phone accepts our slow-down request
+ * (opt #2). Without this the readout would be stuck at the connect-time value. */
+static void notify_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
+{
+    if (event == ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT && param)
+        s_conn_interval = param->update_conn_params.conn_int;   /* 1.25 ms units */
+}
 
 class SrvCb : public BLEServerCallbacks {
-    /* Use the param overloads so we can capture the disconnect reason code. */
-    void onConnect(BLEServer *, esp_ble_gatts_cb_param_t *) override {
+    /* Use the param overloads so we can capture the disconnect reason + conn params. */
+    void onConnect(BLEServer *s, esp_ble_gatts_cb_param_t *param) override {
         s_connected = true; s_connects++;
+        if (param) {
+            s_conn_interval = param->connect.conn_params.interval;  // 1.25 ms units
+            /* Power opt #2: ask the phone for a long connection interval + slave
+             * latency so the radio sleeps between events (notifications tolerate
+             * latency fine). Units: interval 1.25 ms, timeout 10 ms. Request
+             * 200-320 ms, latency 2, 5 s supervision timeout. */
+            s->updateConnParams(param->connect.remote_bda,
+                                 0xA0 /*160 =200ms*/, 0x100 /*256 =320ms*/,
+                                 2 /*latency*/, 500 /*=5s*/);
+        }
     }
     void onDisconnect(BLEServer *, esp_ble_gatts_cb_param_t *param) override {
         s_connected = false; s_disconnects++;
+        s_conn_interval = 0;
         if (param) s_last_reason = (uint8_t)param->disconnect.reason;
         if (s_active) BLEDevice::startAdvertising();
     }
@@ -401,6 +426,8 @@ class SrvCb : public BLEServerCallbacks {
 uint32_t notify_ble_connects(void)    { return s_connects;    }
 uint32_t notify_ble_disconnects(void) { return s_disconnects; }
 uint8_t  notify_ble_last_reason(void) { return s_last_reason; }
+/* Connection interval in ms (0 if not connected) — opt #2 verification. */
+uint16_t notify_ble_conn_interval_ms(void) { return (uint16_t)(s_conn_interval * 5 / 4); }
 
 /* ---- public ---- */
 /* User intent: once notifications have been started, keep them alive across
@@ -427,6 +454,7 @@ bool notify_ble_begin(void)
         /* Name MUST start with "Bangle.js" — Gadgetbridge selects its protocol by
          * name prefix, else it's "unsupported". User aliases it in the app. */
         BLEDevice::init("Bangle.js T-Watch Ultra");
+        BLEDevice::setCustomGapHandler(notify_gap_cb);  /* live conn-interval (opt #2) */
 
         /* Raise the local MTU cap (default 23 truncated outgoing JSON to 24 bytes,
          * dropping the closing brace). Gadgetbridge negotiates up to fit a line. */
@@ -467,6 +495,17 @@ bool notify_ble_begin(void)
         adv->setAppearance(0x00C0);                       /* Generic Watch icon */
         adv->addServiceUUID(BLEUUID((uint16_t)0x1811));   /* Alert Notification Service */
         adv->setScanResponse(true);
+
+        /* Power opt #2 (assist): advertise a preferred long connection interval
+         * so the phone connects slow from the start (units 1.25 ms: 200-320 ms). */
+        adv->setMinPreferred(0xA0);
+        adv->setMaxPreferred(0x100);
+
+        /* Power opt #4: advertise less often while disconnected. Units 0.625 ms:
+         * 0x500=1280 -> ~800 ms, 0x800=2048 -> ~1.28 s. Slower reconnect discovery
+         * (~1 s) in exchange for much lower idle-advertising draw. */
+        adv->setMinInterval(0x500);
+        adv->setMaxInterval(0x800);
 
         /* Keep the controller alive across scanner sessions — the Arduino BLE lib
          * can't re-init after a teardown, so scanners must not deinit it. */

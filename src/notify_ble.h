@@ -42,6 +42,7 @@ void notify_ble_find_phone(bool on);/* ring the phone via Gadgetbridge (on/off) 
 uint32_t notify_ble_connects(void);     /* # of GATT connects seen        */
 uint32_t notify_ble_disconnects(void);  /* # of disconnects               */
 uint8_t  notify_ble_last_reason(void);  /* last disconnect reason code    */
+uint16_t notify_ble_conn_interval_ms(void); /* live connection interval (opt #2) */
 uint32_t notify_ble_rx_bytes(void);     /* total bytes received from phone */
 uint32_t notify_ble_total_added(void);  /* monotonic count of stored notifs */
 void notify_ble_loop(void);       /* drain RX buffer; call from main loop */

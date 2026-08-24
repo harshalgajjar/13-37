@@ -883,6 +883,15 @@ static bool     s_is_dimmed        = false;
 // the dimmed state returns to the slider value instead of full brightness.
 static uint8_t  s_active_brightness = DEVICE_MAX_BRIGHTNESS_LEVEL;
 
+// Power-opt diagnostics (surfaced on the Notify screen so each optimization is
+// verifiable on-device). s_loop_hz is the measured main-loop rate; it drops when
+// the screen dims because loop() idles longer (opt #5 — reduce active-core time;
+// true light-sleep needs the PM framework, which isn't compiled into this build).
+static volatile uint32_t s_loop_hz = 0;
+uint32_t main_loop_hz(void)  { return s_loop_hz; }
+uint32_t main_cpu_mhz(void)  { return getCpuFrequencyMhz(); }
+bool     clock_is_dimmed(void){ return s_is_dimmed; }
+
 void clock_screen_set_dim_timeout(uint32_t ms)
 {
     s_dim_timeout_ms = ms;
@@ -1247,6 +1256,13 @@ void setup()
 
     instance.begin();
     instance.powerControl(POWER_NFC, false); // ensure NFC is off on boot
+
+    // Power opt #6: run the CPU at 160 MHz instead of the 240 MHz default. The UI
+    // + BLE are light enough that 160 is imperceptible, and it cuts active-core
+    // draw noticeably. (BLE needs >= 80 MHz; 160 is a safe margin.) Verify on the
+    // Notify screen — it prints the live getCpuFrequencyMhz().
+    setCpuFrequencyMhz(160);
+
     beginLvglHelper(instance);
 
     // Boot splash — brand the firmware on the panel before the clock comes up.
@@ -1912,4 +1928,19 @@ void loop()
     lv_task_handler();
     delay(2);
     lv_task_handler();
+
+    // Power opt #5: when the screen is dimmed the UI isn't changing, so idle the
+    // core longer between iterations (each delay() lets the FreeRTOS idle task
+    // WFI-halt the core). ~40 ms extra ≈ a handful of loops/sec instead of
+    // hundreds, cutting active-core draw. The BLE controller + touch/motion
+    // interrupts still wake us immediately. Verify via the loop-Hz readout: it
+    // collapses when the watch dims.
+    if (s_is_dimmed) delay(40);
+
+    // Loop-rate meter (opt #5 verification): iterations counted per second.
+    static uint32_t s_loop_count = 0;
+    static uint32_t s_loop_win_ms = 0;
+    s_loop_count++;
+    uint32_t nowl = millis();
+    if (nowl - s_loop_win_ms >= 1000) { s_loop_hz = s_loop_count; s_loop_count = 0; s_loop_win_ms = nowl; }
 }
