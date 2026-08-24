@@ -34,14 +34,24 @@ typedef void (*radio_action_fn)(void);
 static radio_action_fn s_pending_action = nullptr;
 static lv_obj_t       *s_conflict_modal = nullptr;
 
-static bool ble_link_owner_active()
+// WiFi tools need the BLE radio fully off (bluedroid can't share with WiFi
+// bring-up); BLE scanners share our still-enabled controller. This flag selects
+// which release the pending action needs.
+static bool s_pending_wifi = false;
+
+static bool ble_link_owner_active(bool wifi)
 {
-    return notify_ble_active() || mouse_hid_is_running();
+    // A WiFi tool conflicts with the BLE stack even while notifications are
+    // merely paused (the stack is still built + the radio is up), so gate on
+    // "built" for WiFi and on "actively advertising/connected" for BLE tools.
+    bool notify_busy = wifi ? notify_ble_is_built() : notify_ble_active();
+    return notify_busy || mouse_hid_is_running();
 }
 
 static void run_pending_action()
 {
-    notify_ble_stop();                              // release the radio
+    if (s_pending_wifi) notify_ble_suspend_radio();  // disable bluedroid+controller
+    else                notify_ble_stop();           // pause; scanner shares controller
     if (mouse_hid_is_running()) mouse_hid_stop();
     radio_action_fn a = s_pending_action;
     s_pending_action = nullptr;
@@ -116,13 +126,16 @@ static void show_conflict_modal()
 }
 
 // Run a radio tool, first confirming + releasing the BLE link if it's in use.
-static void guard_radio(radio_action_fn action)
+// `wifi` = the tool uses WiFi (needs the BLE radio fully suspended, not just
+// paused).
+static void guard_radio(radio_action_fn action, bool wifi = false)
 {
-    if (ble_link_owner_active()) {
-        s_pending_action = action;
-        show_conflict_modal();
+    s_pending_action = action;
+    s_pending_wifi   = wifi;
+    if (ble_link_owner_active(wifi)) {
+        show_conflict_modal();   // Continue -> run_pending_action()
     } else {
-        action();
+        run_pending_action();    // release the radio if needed, then run now
     }
 }
 
@@ -130,15 +143,16 @@ static void guard_radio(radio_action_fn action)
 // "Analyze" is really three analyzers chained by swipes (WiFi -> Bluetooth ->
 // LoRa), which is confusing on entry. Ask which band up front. WiFi and BT both
 // need the radio, so picking either also releases the notification link.
-static void analyze_release_and(radio_action_fn open)
+static void analyze_release_and(radio_action_fn open, bool wifi)
 {
     conflict_close();
-    notify_ble_stop();
+    if (wifi) notify_ble_suspend_radio();   // WiFi analyzer: free the radio
+    else      notify_ble_stop();            // BT analyzer: pause, share controller
     if (mouse_hid_is_running()) mouse_hid_stop();
     open();
 }
-static void analyze_pick_wifi(lv_event_t *) { analyze_release_and(analyze_screen_show); }
-static void analyze_pick_bt(lv_event_t *)   { analyze_release_and(bt_analyze_screen_show); }
+static void analyze_pick_wifi(lv_event_t *) { analyze_release_and(analyze_screen_show, true); }
+static void analyze_pick_bt(lv_event_t *)   { analyze_release_and(bt_analyze_screen_show, false); }
 
 static void show_analyze_chooser()
 {
@@ -293,7 +307,7 @@ static void on_eviltwin_clicked(lv_event_t *e)
         evil_twin_stop();
         set_eviltwin_tile_running(false);
     } else {
-        guard_radio([]{ set_eviltwin_tile_running(evil_twin_start()); });  // WiFi
+        guard_radio([]{ set_eviltwin_tile_running(evil_twin_start()); }, true);  // WiFi
     }
 }
 
@@ -311,7 +325,7 @@ static void on_flock_clicked(lv_event_t *e)
         flock_stop();
         set_flock_tile_running(false);
     } else {
-        guard_radio([]{ set_flock_tile_running(flock_start()); });
+        guard_radio([]{ set_flock_tile_running(flock_start()); }, true);  // WiFi + BLE
     }
 }
 
@@ -588,7 +602,7 @@ void tools_screen_create()
     lv_obj_add_event_cb(t_aprs, [](lv_event_t *) { aprs_screen_show(); }, LV_EVENT_CLICKED, NULL);
 
     // WiFi tile opens the site-survey + ping-sweep screen.
-    lv_obj_add_event_cb(t_wifi, [](lv_event_t *) { guard_radio(wifi_screen_show); }, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(t_wifi, [](lv_event_t *) { guard_radio(wifi_screen_show, true); }, LV_EVENT_CLICKED, NULL);
 
     // Analyze tile opens the WiFi channel utilisation visualisation.
     lv_obj_add_event_cb(t_analyze, [](lv_event_t *) { show_analyze_chooser(); }, LV_EVENT_CLICKED, NULL);

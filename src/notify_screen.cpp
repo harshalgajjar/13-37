@@ -23,7 +23,13 @@ static lv_obj_t *list = nullptr;
 static lv_obj_t *status_dot = nullptr;
 static lv_obj_t *status_lbl = nullptr;
 static lv_obj_t *pin_lbl = nullptr;
+static lv_obj_t *diag_lbl = nullptr;   // power-opt verification readout
 static lv_obj_t *empty_lbl = nullptr;
+
+// Power-opt diagnostics, defined in main.cpp.
+extern uint32_t main_cpu_mhz(void);
+extern uint32_t main_loop_hz(void);
+extern bool     clock_is_dimmed(void);
 static lv_timer_t *refr_timer = nullptr;
 static int last_shown = -1;
 static bool last_conn = false;
@@ -119,6 +125,17 @@ static void update_status(void)
                   (unsigned long)notify_ble_disconnects(),
                   notify_ble_last_reason());
     last_conn = conn;
+
+    /* Power-opt verification: CPU freq (#6), live connection interval (#2), and
+     * the main-loop rate (#5 — collapses when the screen dims). */
+    if (diag_lbl) {
+        lv_label_set_text_fmt(diag_lbl,
+            "CPU %lu MHz    loop %lu/s%s\nBT link every %u ms",
+            (unsigned long)main_cpu_mhz(),
+            (unsigned long)main_loop_hz(),
+            clock_is_dimmed() ? "  (dim)" : "",
+            notify_ble_conn_interval_ms());
+    }
 }
 
 static void on_refresh(lv_timer_t *)
@@ -189,10 +206,19 @@ void notify_screen_create()
     lv_obj_align(pin_lbl, LV_ALIGN_TOP_MID, 0, 74);
     lv_label_set_text_fmt(pin_lbl, "Pairing PIN  %lu", (unsigned long)NOTIFY_PIN);
 
+    /* Power-opt verification readout — kept large + centred + bright so it's easy
+     * to read (it sits above the list, away from the rounded corners). */
+    diag_lbl = lv_label_create(notify_screen);
+    lv_obj_set_style_text_font(diag_lbl, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(diag_lbl, COL_INK, 0);
+    lv_obj_set_style_text_align(diag_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(diag_lbl, lv_pct(96));
+    lv_obj_align(diag_lbl, LV_ALIGN_BOTTOM_MID, 0, -32);
+
     /* scrollable list */
     list = lv_obj_create(notify_screen);
     lv_obj_remove_style_all(list);
-    lv_obj_set_size(list, lv_pct(92), 382);
+    lv_obj_set_size(list, lv_pct(92), 300);
     lv_obj_align(list, LV_ALIGN_TOP_MID, 0, 100);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(list, 10, 0);

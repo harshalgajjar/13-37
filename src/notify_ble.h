@@ -26,7 +26,8 @@ typedef struct {
 
 /* Lifecycle */
 bool notify_ble_begin(void);      /* start advertising; false if a scanner holds BLE */
-void notify_ble_stop(void);       /* tear down, release the BLE radio */
+void notify_ble_stop(void);       /* pause: drop link, keep controller up (BLE scanners share it) */
+void notify_ble_suspend_radio(void); /* WiFi tools: disable bluedroid+controller to free the radio */
 bool notify_ble_active(void);     /* is the link advertising/connected right now? */
 bool notify_ble_connected(void);  /* is a phone connected? */
 bool notify_ble_is_built(void);   /* has the BLE stack been constructed this boot? */
@@ -42,6 +43,7 @@ void notify_ble_find_phone(bool on);/* ring the phone via Gadgetbridge (on/off) 
 uint32_t notify_ble_connects(void);     /* # of GATT connects seen        */
 uint32_t notify_ble_disconnects(void);  /* # of disconnects               */
 uint8_t  notify_ble_last_reason(void);  /* last disconnect reason code    */
+uint16_t notify_ble_conn_interval_ms(void); /* live connection interval (opt #2) */
 uint32_t notify_ble_rx_bytes(void);     /* total bytes received from phone */
 uint32_t notify_ble_total_added(void);  /* monotonic count of stored notifs */
 void notify_ble_loop(void);       /* drain RX buffer; call from main loop */

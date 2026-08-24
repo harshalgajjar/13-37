@@ -11,8 +11,9 @@
 #include <BLE2902.h>
 #include <BLESecurity.h>
 #include <esp_gap_ble_api.h>   /* esp_ble_gap_set_security_param, static passkey */
-#include <esp_bt.h>            /* esp_bt_controller_get_status — teardown detect */
-#include <WiFi.h>              /* WiFi.getMode — this build can't run WiFi + BLE  */
+#include <esp_bt.h>            /* esp_bt_controller_enable/disable                 */
+#include <esp_bt_main.h>       /* esp_bluedroid_enable/disable (reversible)       */
+#include <WiFi.h>              /* WiFi.getMode — WiFi tools need the BLE radio off */
 #include <string.h>
 #include "ble_scan_manager.h"   /* ble_scan_active() — scanner arbitration */
 #include "mouse_hid.h"          /* take over the BLE radio from the mouse   */
@@ -385,14 +386,39 @@ uint32_t notify_ble_rx_bytes(void) { return s_rx_bytes; }
 static volatile uint32_t s_connects    = 0;
 static volatile uint32_t s_disconnects = 0;
 static volatile uint8_t  s_last_reason = 0;
+/* Latest connection interval reported by the controller, in units of 1.25 ms
+ * (0 = not connected). Power opt #2 verification: this should read a few-hundred
+ * ms, not tens, once the longer params are honoured. */
+static volatile uint16_t s_conn_interval = 0;
+
+/* BLEDevice invokes this for EVERY GAP event in addition to its own handling
+ * (setCustomGapHandler), so we can track the LIVE connection interval — it fires
+ * whenever the params change, e.g. after the phone accepts our slow-down request
+ * (opt #2). Without this the readout would be stuck at the connect-time value. */
+static void notify_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
+{
+    if (event == ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT && param)
+        s_conn_interval = param->update_conn_params.conn_int;   /* 1.25 ms units */
+}
 
 class SrvCb : public BLEServerCallbacks {
-    /* Use the param overloads so we can capture the disconnect reason code. */
-    void onConnect(BLEServer *, esp_ble_gatts_cb_param_t *) override {
+    /* Use the param overloads so we can capture the disconnect reason + conn params. */
+    void onConnect(BLEServer *s, esp_ble_gatts_cb_param_t *param) override {
         s_connected = true; s_connects++;
+        if (param) {
+            s_conn_interval = param->connect.conn_params.interval;  // 1.25 ms units
+            /* Power opt #2: ask the phone for a long connection interval + slave
+             * latency so the radio sleeps between events (notifications tolerate
+             * latency fine). Units: interval 1.25 ms, timeout 10 ms. Request
+             * 200-320 ms, latency 2, 5 s supervision timeout. */
+            s->updateConnParams(param->connect.remote_bda,
+                                 0xA0 /*160 =200ms*/, 0x100 /*256 =320ms*/,
+                                 2 /*latency*/, 500 /*=5s*/);
+        }
     }
     void onDisconnect(BLEServer *, esp_ble_gatts_cb_param_t *param) override {
         s_connected = false; s_disconnects++;
+        s_conn_interval = 0;
         if (param) s_last_reason = (uint8_t)param->disconnect.reason;
         if (s_active) BLEDevice::startAdvertising();
     }
@@ -401,6 +427,8 @@ class SrvCb : public BLEServerCallbacks {
 uint32_t notify_ble_connects(void)    { return s_connects;    }
 uint32_t notify_ble_disconnects(void) { return s_disconnects; }
 uint8_t  notify_ble_last_reason(void) { return s_last_reason; }
+/* Connection interval in ms (0 if not connected) — opt #2 verification. */
+uint16_t notify_ble_conn_interval_ms(void) { return (uint16_t)(s_conn_interval * 5 / 4); }
 
 /* ---- public ---- */
 /* User intent: once notifications have been started, keep them alive across
@@ -411,6 +439,8 @@ static bool s_want_on = false;
  * Arduino BLE library can't cleanly re-init after a full teardown, so we build
  * it ONCE and thereafter only pause/resume advertising. */
 static bool s_built = false;
+
+static void radio_reacquire(void);   /* fwd: re-enable radio after a WiFi tool */
 
 bool notify_ble_begin(void)
 {
@@ -427,6 +457,7 @@ bool notify_ble_begin(void)
         /* Name MUST start with "Bangle.js" — Gadgetbridge selects its protocol by
          * name prefix, else it's "unsupported". User aliases it in the app. */
         BLEDevice::init("Bangle.js T-Watch Ultra");
+        BLEDevice::setCustomGapHandler(notify_gap_cb);  /* live conn-interval (opt #2) */
 
         /* Raise the local MTU cap (default 23 truncated outgoing JSON to 24 bytes,
          * dropping the closing brace). Gadgetbridge negotiates up to fit a line. */
@@ -468,19 +499,35 @@ bool notify_ble_begin(void)
         adv->addServiceUUID(BLEUUID((uint16_t)0x1811));   /* Alert Notification Service */
         adv->setScanResponse(true);
 
+        /* Power opt #2 (assist): advertise a preferred long connection interval
+         * so the phone connects slow from the start (units 1.25 ms: 200-320 ms). */
+        adv->setMinPreferred(0xA0);
+        adv->setMaxPreferred(0x100);
+
+        /* Power opt #4: advertise less often while disconnected. Units 0.625 ms:
+         * 0x500=1280 -> ~800 ms, 0x800=2048 -> ~1.28 s. Slower reconnect discovery
+         * (~1 s) in exchange for much lower idle-advertising draw. */
+        adv->setMinInterval(0x500);
+        adv->setMaxInterval(0x800);
+
         /* Keep the controller alive across scanner sessions — the Arduino BLE lib
          * can't re-init after a teardown, so scanners must not deinit it. */
         ble_scan_keep_controller(true);
         s_built = true;
     }
 
+    radio_reacquire();   /* re-enable bluedroid + controller if a WiFi tool freed them */
     BLEDevice::startAdvertising();
     s_active = true;
     return true;
 }
 
+/* Radio suspended (bluedroid + controller disabled) for a WiFi tool. */
+static bool s_radio_suspended = false;
+
 /* "Stop" is a PAUSE: drop the connection + advertising but keep the BLEDevice
- * stack built, so we can resume without a re-init the library can't survive. */
+ * stack built, so we can resume without a re-init the library can't survive.
+ * Used by BLE scanners, which then SHARE our still-enabled controller. */
 void notify_ble_stop(void)
 {
     if (!s_active) return;
@@ -491,6 +538,37 @@ void notify_ble_stop(void)
     }
     s_active = false; s_connected = false;
     portENTER_CRITICAL(&s_mux); s_rx_len = 0; portEXIT_CRITICAL(&s_mux);
+}
+
+/* Deeper release for WiFi tools: WiFi can't come up cleanly alongside the heavy
+ * bluedroid stack, so disable bluedroid + the BT controller to free the radio.
+ * These are the REVERSIBLE enable/disable calls (not init/deinit), so the stack
+ * stays built and reacquire brings it back — no fragile BLEDevice re-init. */
+void notify_ble_suspend_radio(void)
+{
+    call_ring_stop();
+    if (s_active && s_built) {
+        BLEDevice::stopAdvertising();
+        if (s_connected && s_server) s_server->disconnect(s_server->getConnId());
+    }
+    s_active = false; s_connected = false;
+    if (s_built && !s_radio_suspended) {
+        esp_bluedroid_disable();
+        esp_bt_controller_disable();
+        s_radio_suspended = true;
+    }
+}
+
+/* Called from notify_ble_begin before it re-advertises. If a WiFi tool suspended
+ * the radio, bring it back. Re-enabling bluedroid + the controller in-place after
+ * WiFi has proven to hang with this BLE library (its stack can't cleanly resume),
+ * so a clean reboot is the reliable path — it resets both radios and notifications
+ * come back fresh. This only fires after a WiFi tool, never on a normal start. */
+static void radio_reacquire(void)
+{
+    if (!s_radio_suspended) return;
+    delay(60);        // let the pending screen redraw so it's not a black flash
+    ESP.restart();
 }
 
 bool notify_ble_active(void)    { return s_active; }
